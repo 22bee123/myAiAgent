@@ -174,29 +174,113 @@ Each `Bot` is built from boxes, spheres, and cylinders. To use a custom 3D model
 
 ---
 
-## Wiring the chat to a real LLM
+## Wiring the chat to a real LLM (DeepSeek)
 
-The chat currently calls `POST /api/agents/:id/chat` and gets back a canned reply. To plug in a real LLM:
+The chat calls `POST /api/agents/:id/chat`. The route is already wired to call the **DeepSeek API** (which is OpenAI-compatible) — you just need to provide your API key.
 
-1. Open `src/app/api/agents/[id]/chat/route.ts`.
-2. Replace the mock reply block with your SDK call. Example using `z-ai-web-dev-sdk`:
+### Setup
 
-   ```ts
-   import ZAI from "z-ai-web-dev-sdk";
+1. Get a DeepSeek API key from <https://platform.deepseek.com/api_keys>.
+2. Copy `.env.local.example` → `.env.local` (or just create `.env.local` directly — it's gitignored).
+3. Fill in the key:
 
-   const zai = await ZAI.create();
-   const completion = await zai.chat.completions.create({
-     messages: [
-       { role: "system", content: `You are ${agent.name}. ${agent.description}` },
-       { role: "user", content: userMessage },
-     ],
-   });
-   return NextResponse.json({ reply: completion.choices[0].message.content });
+   ```env
+   DEEPSEEK_API_KEY=sk-your-real-key-here
+   DEEPSEEK_BASE_URL=https://api.deepseek.com/v1   # default, optional
+   DEEPSEEK_MODEL=deepseek-chat                     # default = V3; use "deepseek-reasoner" for R1
    ```
 
-3. Add `ZAI_API_KEY` to your `.env.local` and to your Vercel project's Environment Variables.
+4. Restart `npm run dev`. That's it — the chat panel now hits DeepSeek for real responses.
 
-The frontend contract (`{ reply: string }`) doesn't change, so no UI work is needed.
+### How it works
+
+- Each agent has its own `systemPrompt` field in `src/lib/agents.ts`. Edit those to change how each agent talks + behaves.
+- The route falls back to canned mock replies when `DEEPSEEK_API_KEY` is missing or still the placeholder, so the demo works even before you've plugged in a key.
+- The response includes `source: "deepseek" | "mock" | "error"` so the frontend can show a small badge if you want.
+
+### Switching to a different LLM provider
+
+DeepSeek is OpenAI-compatible, so the same code works for OpenAI, Together, Groq, Mistral, etc. — just change the env vars:
+
+```env
+DEEPSEEK_API_KEY=sk-your-openai-key
+DEEPSEEK_BASE_URL=https://api.openai.com/v1
+DEEPSEEK_MODEL=gpt-4o-mini
+```
+
+(Consider renaming the env vars if you do this — kept as-is here for backward compat with the existing scaffold.)
+
+### Vercel deployment
+
+Add the same three env vars under **Project Settings → Environment Variables** in the Vercel dashboard. The build will pick them up at runtime.
+
+---
+
+## Connecting the Email Agent to your mailbox
+
+The Email Agent has two real-email endpoints:
+
+- `GET /api/agents/email-agent/inbox?limit=10` — fetches the most recent messages from your inbox via IMAP
+- `POST /api/agents/email-agent/send` — sends an email via SMTP (body: `{ to, subject, text }`)
+
+When email isn't configured, both endpoints return mock data with `connected: false` so the UI still works in demo mode.
+
+### Option 1 — Gmail (recommended, easiest)
+
+Gmail no longer accepts your account password for IMAP. You need an **App Password**:
+
+1. Enable 2-Step Verification on your Google Account: <https://myaccount.google.com/security>
+2. Create an App Password: <https://myaccount.google.com/apppasswords> (choose "Mail" as the app)
+3. Add these to `.env.local`:
+
+   ```env
+   EMAIL_HOST=imap.gmail.com
+   EMAIL_PORT=993
+   EMAIL_USER=you@gmail.com
+   EMAIL_PASS=abcd-efgh-ijkl-mnop       # the 16-char app password (no spaces)
+
+   SMTP_HOST=smtp.gmail.com
+   SMTP_PORT=465
+   SMTP_FROM=you@gmail.com
+   ```
+
+4. Restart `npm run dev`. Visit <http://localhost:3000/api/agents/email-agent/inbox?limit=5> in your browser — you should see your real inbox as JSON.
+
+### Option 2 — Outlook / Office 365
+
+```env
+EMAIL_HOST=outlook.office365.com
+EMAIL_PORT=993
+EMAIL_USER=you@outlook.com
+EMAIL_PASS=your-password
+
+SMTP_HOST=smtp.office365.com
+SMTP_PORT=465
+SMTP_FROM=you@outlook.com
+```
+
+> ⚠️ Microsoft is deprecating basic auth for IMAP/SMTP. For production Outlook/Office365, switch to OAuth via Microsoft Graph — see "Going to production" below.
+
+### Option 3 — Any other IMAP provider
+
+Use your provider's standard IMAP + SMTP settings. Most providers publish them in their help docs (search "your-provider IMAP settings"). Common ports: 993 for IMAP, 465 or 587 for SMTP.
+
+### Going to production (OAuth instead of app passwords)
+
+App passwords work fine for personal projects but are deprecated by Microsoft and have security limitations. For a real product, use OAuth:
+
+| Provider  | Recommended API                       |
+| --------- | ------------------------------------- |
+| Gmail     | Gmail API + Google OAuth 2.0          |
+| Outlook   | Microsoft Graph API + MSAL            |
+| Other     | Provider-specific OAuth, or stick with IMAP app passwords |
+
+The current `src/lib/email.ts` uses `imapflow` for IMAP. To migrate to OAuth, you'd swap the `auth: { user, pass }` block for `auth: { user, accessToken }` and add an OAuth token-refresh layer. The rest of the code stays the same.
+
+### Security notes
+
+- `POST /api/agents/email-agent/send` has **no authentication** — anyone who can hit your URL can send mail as you. Add an auth layer (NextAuth session check, API key header, or restrict to Vercel preview deploys) before deploying to production.
+- The Email Agent's LLM prompt instructs it to tell the user when email isn't connected and offer to walk them through setup — so users get a helpful message instead of a silent failure.
 
 ---
 
