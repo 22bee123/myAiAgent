@@ -28,7 +28,17 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Send, Trash2, Loader2, Inbox, MessageSquare, RefreshCw, MailWarning } from "lucide-react";
+import {
+  X,
+  Send,
+  Trash2,
+  Loader2,
+  Inbox as InboxIcon,
+  MessageSquare,
+  RefreshCw,
+  MailWarning,
+  Briefcase,
+} from "lucide-react";
 
 import { getAgentById } from "@/lib/agents";
 import { useOfficeStore } from "@/store/useOfficeStore";
@@ -51,7 +61,35 @@ interface InboxResult {
   messages: EmailMessage[];
 }
 
-type Tab = "chat" | "inbox";
+// ---- Tracker type (kept in sync with lib/applications.ts) -----------------
+type ApplicationStatus =
+  | "applied"
+  | "viewed"
+  | "interview"
+  | "offer"
+  | "closed"
+  | "updated";
+
+interface Application {
+  id: string;
+  company: string;
+  role: string;
+  status: ApplicationStatus;
+  lastUpdate: string;
+  daysSinceUpdate: number;
+  latestEmail: EmailMessage;
+  history: EmailMessage[];
+}
+
+interface TrackerResult {
+  connected: boolean;
+  total: number;
+  byStatus: Record<ApplicationStatus, number>;
+  applications: Application[];
+  error?: string;
+}
+
+type Tab = "chat" | "inbox" | "tracker";
 
 export function AgentPanel() {
   const selectedId = useOfficeStore((s) => s.selectedId);
@@ -62,6 +100,7 @@ export function AgentPanel() {
 
   const agent = selectedId ? getAgentById(selectedId) : undefined;
   const isEmailAgent = agent?.id === "email-agent";
+  const isApplicationsAgent = agent?.id === "applications-agent";
 
   const [tab, setTab] = useState<Tab>("chat");
   const [input, setInput] = useState("");
@@ -72,6 +111,11 @@ export function AgentPanel() {
   const [inbox, setInbox] = useState<InboxResult | null>(null);
   const [inboxLoading, setInboxLoading] = useState(false);
   const [inboxError, setInboxError] = useState<string | null>(null);
+
+  // ---- Tracker state (only used when agent is applications-agent) --------
+  const [tracker, setTracker] = useState<TrackerResult | null>(null);
+  const [trackerLoading, setTrackerLoading] = useState(false);
+  const [trackerError, setTrackerError] = useState<string | null>(null);
 
   const loadInbox = useCallback(async () => {
     setInboxLoading(true);
@@ -87,6 +131,25 @@ export function AgentPanel() {
       setInboxError(err instanceof Error ? err.message : "Failed to load inbox");
     } finally {
       setInboxLoading(false);
+    }
+  }, []);
+
+  const loadTracker = useCallback(async () => {
+    setTrackerLoading(true);
+    setTrackerError(null);
+    try {
+      const res = await fetch(`/api/agents/applications-agent/tracker?limit=50`);
+      const data = (await res.json()) as TrackerResult & { error?: string };
+      if (data.error && !data.applications?.length) {
+        setTrackerError(data.error);
+      }
+      setTracker(data);
+    } catch (err) {
+      setTrackerError(
+        err instanceof Error ? err.message : "Failed to load tracker"
+      );
+    } finally {
+      setTrackerLoading(false);
     }
   }, []);
 
@@ -106,17 +169,21 @@ export function AgentPanel() {
     }
   }, [selectedId]);
 
-  // Reset to chat tab + load inbox when switching to email-agent.
+  // Reset to chat tab + load inbox/tracker when switching agents.
   useEffect(() => {
     if (selectedId === "email-agent") {
       // Don't auto-jump to inbox — let the user click. But pre-fetch so the
       // inbox tab is instant when they do click.
       loadInbox();
+    } else if (selectedId === "applications-agent") {
+      // Pre-fetch the tracker so the Applications tab is instant.
+      loadTracker();
     } else {
       setTab("chat");
       setInbox(null);
+      setTracker(null);
     }
-  }, [selectedId, loadInbox]);
+  }, [selectedId, loadInbox, loadTracker]);
 
   const send = useCallback(async () => {
     if (!agent || !input.trim() || sending) return;
@@ -203,19 +270,37 @@ export function AgentPanel() {
             </button>
           </header>
 
-          {/* ---- Tabs (only for email-agent) ---- */}
-          {isEmailAgent && (
+          {/* ---- Tabs (email-agent: Inbox+Chat, applications-agent: Applications+Chat) ---- */}
+          {(isEmailAgent || isApplicationsAgent) && (
             <div className="flex border-b border-slate-700/60 bg-slate-950/40">
-              <TabButton
-                active={tab === "inbox"}
-                onClick={() => setTab("inbox")}
-                color={agent.color}
-                icon={<Inbox className="h-3.5 w-3.5" />}
-                label="Inbox"
-                badge={
-                  inbox && inbox.unread > 0 ? String(inbox.unread) : undefined
-                }
-              />
+              {isEmailAgent && (
+                <TabButton
+                  active={tab === "inbox"}
+                  onClick={() => setTab("inbox")}
+                  color={agent.color}
+                  icon={<InboxIcon className="h-3.5 w-3.5" />}
+                  label="Inbox"
+                  badge={
+                    inbox && inbox.unread > 0
+                      ? String(inbox.unread)
+                      : undefined
+                  }
+                />
+              )}
+              {isApplicationsAgent && (
+                <TabButton
+                  active={tab === "tracker"}
+                  onClick={() => setTab("tracker")}
+                  color={agent.color}
+                  icon={<Briefcase className="h-3.5 w-3.5" />}
+                  label="Applications"
+                  badge={
+                    tracker && tracker.total > 0
+                      ? String(tracker.total)
+                      : undefined
+                  }
+                />
+              )}
               <TabButton
                 active={tab === "chat"}
                 onClick={() => setTab("chat")}
@@ -235,6 +320,15 @@ export function AgentPanel() {
                 loading={inboxLoading}
                 error={inboxError}
                 onRefresh={loadInbox}
+                color={agent.color}
+              />
+            ) : isApplicationsAgent && tab === "tracker" ? (
+              /* ===== APPLICATIONS TAB (applications-agent only) ===== */
+              <TrackerView
+                tracker={tracker}
+                loading={trackerLoading}
+                error={trackerError}
+                onRefresh={loadTracker}
                 color={agent.color}
               />
             ) : (
@@ -522,6 +616,181 @@ function InboxView({
 
       <p className="mt-3 text-[10px] text-slate-500">
         Via <code>/api/agents/email-agent/inbox</code> (IMAP).
+      </p>
+    </section>
+  );
+}
+
+// ===========================================================================
+// TrackerView — Applications Agent's status board
+// ===========================================================================
+function TrackerView({
+  tracker,
+  loading,
+  error,
+  onRefresh,
+  color,
+}: {
+  tracker: TrackerResult | null;
+  loading: boolean;
+  error: string | null;
+  onRefresh: () => void;
+  color: string;
+}) {
+  // Loading state (first fetch)
+  if (loading && !tracker) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-3 py-12 text-slate-400">
+        <Loader2 className="h-6 w-6 animate-spin" style={{ color }} />
+        <p className="text-xs">Scanning inbox for applications…</p>
+      </div>
+    );
+  }
+
+  // Error state
+  if (!tracker && error) {
+    return (
+      <div className="rounded-lg border border-red-500/40 bg-red-950/30 p-3 text-xs text-red-200">
+        <p className="font-semibold">Couldn&apos;t load tracker</p>
+        <p className="mt-1 text-red-300/80">{error}</p>
+        <button
+          onClick={onRefresh}
+          className="mt-2 rounded border border-red-400/40 px-2 py-1 text-[10px] hover:bg-red-900/40"
+        >
+          Try again
+        </button>
+      </div>
+    );
+  }
+
+  const statusConfig: Record<
+    ApplicationStatus,
+    { label: string; bg: string; text: string; dot: string }
+  > = {
+    applied: { label: "Applied", bg: "#1e3a8a22", text: "#93c5fd", dot: "#3b82f6" },
+    viewed: { label: "Viewed", bg: "#ca8a0422", text: "#fde68a", dot: "#eab308" },
+    interview: { label: "Interview", bg: "#9333ea22", text: "#d8b4fe", dot: "#a855f7" },
+    offer: { label: "Offer", bg: "#16a34a22", text: "#86efac", dot: "#22c55e" },
+    closed: { label: "Closed", bg: "#7f1d1d22", text: "#fca5a5", dot: "#ef4444" },
+    updated: { label: "Updated", bg: "#47556922", text: "#cbd5e1", dot: "#64748b" },
+  };
+
+  return (
+    <section className="flex flex-col">
+      {/* Header row */}
+      <div className="mb-2 flex items-center justify-between">
+        <h3 className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+          {tracker?.connected
+            ? `${tracker.total} tracked`
+            : "Tracker (demo)"}
+        </h3>
+        <button
+          onClick={onRefresh}
+          disabled={loading}
+          className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-slate-400 hover:bg-slate-700/50 hover:text-white disabled:opacity-40"
+          title="Refresh tracker"
+        >
+          <RefreshCw className={`h-3 w-3 ${loading ? "animate-spin" : ""}`} />
+          Refresh
+        </button>
+      </div>
+
+      {/* Demo mode banner */}
+      {tracker && !tracker.connected && (
+        <div className="mb-3 flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-950/30 p-2.5 text-[11px] text-amber-200">
+          <MailWarning className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <div>
+            <p className="font-semibold">Demo mode — email not connected</p>
+            <p className="mt-0.5 text-amber-300/80">
+              Showing mock applications. To track your real applications, set{" "}
+              <code className="rounded bg-amber-900/40 px-1">EMAIL_*</code> vars
+              in <code className="rounded bg-amber-900/40 px-1">.env.local</code>.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Status summary chips */}
+      {tracker && tracker.applications.length > 0 && (
+        <div className="mb-3 flex flex-wrap gap-1.5">
+          {(["interview", "viewed", "applied", "offer", "closed"] as ApplicationStatus[])
+            .filter((s) => tracker.byStatus[s] > 0)
+            .map((s) => {
+              const cfg = statusConfig[s];
+              return (
+                <span
+                  key={s}
+                  className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium"
+                  style={{ background: cfg.bg, color: cfg.text }}
+                >
+                  <span
+                    className="h-1.5 w-1.5 rounded-full"
+                    style={{ background: cfg.dot }}
+                  />
+                  {tracker.byStatus[s]} {cfg.label}
+                </span>
+              );
+            })}
+        </div>
+      )}
+
+      {/* Application list */}
+      <div className="space-y-1.5">
+        {tracker?.applications.length === 0 && (
+          <p className="rounded-lg border border-slate-700/60 bg-slate-950/40 px-3 py-6 text-center text-xs italic text-slate-500">
+            No applications found in your recent emails.
+          </p>
+        )}
+        {tracker?.applications.map((app) => {
+          const cfg = statusConfig[app.status];
+          return (
+            <article
+              key={app.id}
+              className="rounded-lg border border-slate-700/60 bg-slate-950/40 p-2.5 text-xs transition hover:border-slate-600"
+            >
+              {/* Top row: status pill + days since update */}
+              <div className="mb-1 flex items-center justify-between gap-2">
+                <span
+                  className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider"
+                  style={{ background: cfg.bg, color: cfg.text }}
+                >
+                  <span
+                    className="h-1.5 w-1.5 rounded-full"
+                    style={{ background: cfg.dot }}
+                  />
+                  {cfg.label}
+                </span>
+                <span
+                  className="shrink-0 text-[10px] font-medium"
+                  style={{
+                    color:
+                      app.daysSinceUpdate > 7 ? "#fca5a5" : "#94a3b8",
+                  }}
+                >
+                  {app.daysSinceUpdate === 0
+                    ? "today"
+                    : `${app.daysSinceUpdate}d ago`}
+                </span>
+              </div>
+
+              {/* Company + role */}
+              <p className="truncate font-semibold text-slate-100">
+                {app.role}
+              </p>
+              <p className="truncate text-slate-400">{app.company}</p>
+
+              {/* Latest email subject */}
+              <p className="mt-1.5 line-clamp-1 text-[11px] italic text-slate-500">
+                ↳ {app.latestEmail.subject}
+              </p>
+            </article>
+          );
+        })}
+      </div>
+
+      <p className="mt-3 text-[10px] text-slate-500">
+        Auto-detected from your inbox via{" "}
+        <code>/api/agents/applications-agent/tracker</code>.
       </p>
     </section>
   );

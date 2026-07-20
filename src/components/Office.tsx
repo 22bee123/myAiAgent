@@ -593,6 +593,7 @@ export function Office() {
     { pos: [-2.2, 0, 0] }, // email-agent
     { pos: [2.2, 0, 0] }, // business-agent
     { pos: [0, 0, -3.2] }, // research-agent
+    { pos: [0, 0, 1.5] }, // applications-agent (front-center)
   ];
 
   return (

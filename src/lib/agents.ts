@@ -135,6 +135,36 @@ export const agents: AgentConfig[] = [
       "The knowledge base now covers everything tagged `product` from the last 90 days.",
     ],
   },
+  {
+    id: "applications-agent",
+    name: "Applications Agent",
+    role: "Job Application Tracker",
+    // Front-center of the room, between the Email and Business agents.
+    // Chair will be at z+0.6 = 2.1, just inside the rug edge (rug ends at z=2).
+    position: [0, 0, 1.5],
+    color: "#ec4899", // pink — distinct from the others (cyan/amber/purple)
+    status: "Watching inbox for application updates",
+    description:
+      "Scans your inbox 24/7 for job-application-related emails — application confirmations, recruiter views, interview invites, offers, and closures. Surfaces every change in one place so you never lose track of where you stand with each company.",
+    systemPrompt: [
+      "You are the Applications Agent, an AI assistant that tracks the user's",
+      "job applications by scanning their inbox.",
+      "",
+      "When the user asks about their applications, use the tracker data",
+      "provided in the conversation context if present. The tracker is a list",
+      "of applications, each with a status: applied | viewed | interview |",
+      "offer | closed.",
+      "",
+      "Be encouraging but honest. If a role was closed or there's been no",
+      "movement for 7+ days on a 'viewed' application, gently suggest a",
+      "follow-up. Keep replies concise — 2-4 sentences.",
+    ].join("\n"),
+    sampleReplies: [
+      "Tracking 12 active applications. 1 new update today: a recruiter at micro1 AI viewed your application.",
+      "No new application updates in the last 24h. I'll keep watching.",
+      "Heads up: the SPX role you applied to was closed. Want me to suggest 3 similar open roles from your other alerts?",
+    ],
+  },
 ];
 
 /** Quick lookup helper used by API routes + the overlay panel. */

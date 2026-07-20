@@ -21,6 +21,7 @@
 import { NextResponse } from "next/server";
 import { getAgentById, systemPromptFor } from "@/lib/agents";
 import { fetchInbox } from "@/lib/email";
+import { buildTracker } from "@/lib/applications";
 
 export const dynamic = "force-dynamic";
 // DeepSeek calls can take a few seconds — give the route plenty of room.
@@ -116,6 +117,66 @@ export async function POST(
           console.error(
             `[chat:${id}] inbox fetch failed, continuing without:`,
             inboxErr instanceof Error ? inboxErr.message : String(inboxErr)
+          );
+        }
+      }
+
+      // ---- Applications Agent: inject tracker context -----------------
+      // Same pattern as email-agent above, but with the application tracker
+      // instead of the raw inbox. The LLM gets a compact list of applications
+      // + statuses so it can answer "any updates on my applications?" with
+      // real data.
+      if (agent.id === "applications-agent") {
+        try {
+          const tracker = await buildTracker(50);
+          if (tracker.connected && tracker.applications.length > 0) {
+            const trackerSummary = tracker.applications
+              .slice(0, 20)
+              .map(
+                (a, i) =>
+                  `${i + 1}. [${a.status.toUpperCase()}] ${a.role} @ ${a.company} ` +
+                  `— last update ${a.daysSinceUpdate}d ago ` +
+                  `(${new Date(a.lastUpdate).toLocaleDateString()}) ` +
+                  `Latest email: "${a.latestEmail.subject}"`
+              )
+              .join("\n");
+            systemPrompt += [
+              "",
+              "---- LIVE APPLICATION TRACKER (use this to answer questions about the",
+              "user's job applications; do NOT invent applications that aren't",
+              "listed here) ----",
+              `Total applications being tracked: ${tracker.total}`,
+              `By status: ${Object.entries(tracker.byStatus)
+                .filter(([_, v]) => v > 0)
+                .map(([k, v]) => `${v} ${k}`)
+                .join(", ")}`,
+              "",
+              trackerSummary,
+              "",
+              "Statuses mean: applied = user submitted app; viewed = recruiter",
+              "looked at it; interview = interview invited; offer = offer",
+              "extended; closed = role closed/expired/rejected.",
+              "",
+              "If the user asks about an application not in this list, tell them",
+              "you don't see it in their inbox and suggest they might have",
+              "applied via a different email account.",
+            ].join("\n");
+          } else {
+            systemPrompt += [
+              "",
+              "---- APPLICATION TRACKER STATUS ----",
+              "The user has NOT connected their mailbox yet (no IMAP credentials",
+              "in .env.local). When they ask about their applications, tell them",
+              "honestly that email isn't connected, and offer to walk them through",
+              "the setup steps (get a Gmail App Password from",
+              "myaccount.google.com/apppasswords, then set EMAIL_HOST, EMAIL_USER,",
+              "EMAIL_PASS, SMTP_HOST, SMTP_FROM in .env.local).",
+            ].join("\n");
+          }
+        } catch (trackerErr) {
+          console.error(
+            `[chat:${id}] tracker fetch failed, continuing without:`,
+            trackerErr instanceof Error ? trackerErr.message : String(trackerErr)
           );
         }
       }
