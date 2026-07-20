@@ -20,6 +20,7 @@
 
 import { NextResponse } from "next/server";
 import { getAgentById, systemPromptFor } from "@/lib/agents";
+import { fetchInbox } from "@/lib/email";
 
 export const dynamic = "force-dynamic";
 // DeepSeek calls can take a few seconds — give the route plenty of room.
@@ -62,6 +63,63 @@ export async function POST(
   // --- Real LLM call via DeepSeek -----------------------------------------
   if (isKeyConfigured(DEEPSEEK_API_KEY)) {
     try {
+      // Build the system prompt. For the Email Agent, we additionally fetch
+      // the user's real inbox and inject a compact summary into the prompt
+      // so the LLM can answer questions like "what's in my inbox?" or
+      // "any urgent emails?" with actual data instead of making things up.
+      //
+      // The inbox fetch is fast (one IMAP call) and gracefully falls back
+      // to mock data when email isn't configured, in which case the prompt
+      // tells the LLM to ask the user to connect their mailbox.
+      let systemPrompt = systemPromptFor(agent);
+
+      if (agent.id === "email-agent") {
+        try {
+          const inbox = await fetchInbox(8);
+          if (inbox.connected && inbox.messages.length > 0) {
+            const inboxSummary = inbox.messages
+              .map(
+                (m, i) =>
+                  `${i + 1}. ${m.unread ? "[UNREAD]" : "[read]"} ` +
+                  `From: ${m.from} | Subject: ${m.subject} | ` +
+                  `Date: ${m.date} | Preview: ${m.snippet.slice(0, 120)}`
+              )
+              .join("\n");
+            systemPrompt += [
+              "",
+              "---- LIVE INBOX DATA (use this to answer questions about the user's",
+              "inbox; do NOT invent emails that aren't listed here) ----",
+              `Total messages in inbox: ${inbox.total}`,
+              `Unread: ${inbox.unread}`,
+              `Most recent ${inbox.messages.length} messages:`,
+              inboxSummary,
+              "",
+              "If the user asks you to send, reply to, or delete an email, tell",
+              "them you can't take direct action yet — but you can draft the",
+              "reply text and they can send it via the Send Email button.",
+            ].join("\n");
+          } else {
+            systemPrompt += [
+              "",
+              "---- INBOX STATUS ----",
+              "The user has NOT connected their mailbox yet (no IMAP credentials",
+              "in .env.local). When they ask about their inbox, tell them",
+              "honestly that email isn't connected, and offer to walk them",
+              "through the setup steps (get a Gmail App Password from",
+              "myaccount.google.com/apppasswords, then set EMAIL_HOST,",
+              "EMAIL_USER, EMAIL_PASS, SMTP_HOST, SMTP_FROM in .env.local).",
+            ].join("\n");
+          }
+        } catch (inboxErr) {
+          // Don't fail the whole chat request if inbox fetch breaks — just
+          // log it and let the LLM answer without inbox context.
+          console.error(
+            `[chat:${id}] inbox fetch failed, continuing without:`,
+            inboxErr instanceof Error ? inboxErr.message : String(inboxErr)
+          );
+        }
+      }
+
       const res = await fetch(`${DEEPSEEK_BASE_URL}/chat/completions`, {
         method: "POST",
         headers: {
@@ -71,7 +129,7 @@ export async function POST(
         body: JSON.stringify({
           model: DEEPSEEK_MODEL,
           messages: [
-            { role: "system", content: systemPromptFor(agent) },
+            { role: "system", content: systemPrompt },
             { role: "user", content: userMessage },
           ],
           // Slightly below default for snappier UI; raise if you want more
