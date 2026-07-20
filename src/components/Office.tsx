@@ -152,8 +152,10 @@ function Chair({ position }: { position: [number, number, number] }) {
       <mesh material={m.chair} castShadow position={[0, 0.45, 0]}>
         <boxGeometry args={[0.5, 0.06, 0.5]} />
       </mesh>
-      {/* backrest */}
-      <mesh material={m.chair} castShadow position={[0, 0.75, -0.22]}>
+      {/* backrest — on the +Z side (away from the desk) so a seated person
+          faces -Z toward the monitor. Previously this was at -Z, which would
+          have made the seated person face away from the desk. */}
+      <mesh material={m.chair} castShadow position={[0, 0.75, 0.22]}>
         <boxGeometry args={[0.5, 0.6, 0.06]} />
       </mesh>
       {/* pole */}

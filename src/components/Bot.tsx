@@ -41,6 +41,25 @@ import { useFrame, type ThreeEvent } from "@react-three/fiber";
 import * as THREE from "three";
 import type { AgentConfig } from "@/lib/agents";
 
+// ---------------------------------------------------------------------------
+// Seated-pose constants.
+//
+// `agent.position` in lib/agents.ts is the DESK position (the workstation).
+// The bot actually sits in the CHAIR, which is z+0.6 in front of the desk
+// (this offset must match the chair placement in Office.tsx).
+//
+// The bot is rotated 180° around Y so it faces -Z (toward the monitor, which
+// is at the back of the desk). Without this rotation the bot would face away
+// from the monitor.
+//
+// SITTING_Y is the bot's group Y position when seated. Lower than the old
+// standing height (0.78) so the bot's hips rest on the chair seat (top at
+// y≈0.48). With group_y=0.6, the body bottom is at y≈0.475 — right on the
+// seat.
+// ---------------------------------------------------------------------------
+const CHAIR_Z_OFFSET = 0.6;
+const SITTING_Y = 0.6;
+
 interface BotProps {
   agent: AgentConfig;
   /** Called when the user left-clicks the bot. */
@@ -100,8 +119,13 @@ export function Bot({ agent, onSelect, onHover }: BotProps) {
   useFrame((state) => {
     const t = state.clock.elapsedTime + phase;
     if (groupRef.current) {
-      // Idle bobbing — about 4cm amplitude, slow.
-      groupRef.current.position.y = agent.position[1] + 0.78 + Math.sin(t * 1.5) * 0.04;
+      // Idle bobbing — about 4cm amplitude, slow. Y baseline is SITTING_Y
+      // (seated) instead of the old 0.78 (standing) so the bot stays in
+      // the chair while it bobs.
+      groupRef.current.position.y =
+        agent.position[1] + SITTING_Y + Math.sin(t * 1.5) * 0.04;
+      // Keep Z locked to the chair position (z+0.6 from the desk).
+      groupRef.current.position.z = agent.position[2] + CHAIR_Z_OFFSET;
       // Subtle head tilt — adds "alive" feel without being distracting.
       if (headRef.current) {
         headRef.current.rotation.z = Math.sin(t * 0.7) * 0.08;
@@ -147,7 +171,18 @@ export function Bot({ agent, onSelect, onHover }: BotProps) {
   return (
     <group
       ref={groupRef}
-      position={agent.position}
+      // Initial seated position: x = desk x, y = seated height, z = chair
+      // (desk z + 0.6). The useFrame loop keeps y and z locked to these
+      // values; x is set once here.
+      position={[
+        agent.position[0],
+        agent.position[1] + SITTING_Y,
+        agent.position[2] + CHAIR_Z_OFFSET,
+      ]}
+      // Rotate 180° around Y so the bot faces -Z (toward the monitor on
+      // the back of the desk). Without this, the bot would face +Z (away
+      // from the monitor) — which is what was happening before this fix.
+      rotation={[0, Math.PI, 0]}
       onPointerOver={handleOver}
       onPointerOut={handleOut}
       onClick={handleClick}
@@ -198,11 +233,18 @@ export function Bot({ agent, onSelect, onHover }: BotProps) {
         <cylinderGeometry args={[0.05, 0.05, 0.4, 10]} />
       </mesh>
 
-      {/* ---- Legs (cylinders) ---- */}
-      <mesh material={limbMat} castShadow position={[-0.13, -0.25, 0]}>
+      {/* ---- Legs (cylinders) — seated pose ----
+          Legs are at the FRONT of the seat (local +Z, which becomes world
+          -Z after the 180° rotation, i.e. between the bot and the desk).
+          They go from the floor (world y=0) up to just below the seat
+          (world y≈0.4), so they look like shins of a seated bot whose
+          thighs are hidden under the body / behind the seat front.
+          Previously these were at local z=0 with the bot standing, which
+          made the bot look like it was straddling the desk. */}
+      <mesh material={limbMat} castShadow position={[-0.13, -0.4, 0.15]}>
         <cylinderGeometry args={[0.06, 0.06, 0.4, 10]} />
       </mesh>
-      <mesh material={limbMat} castShadow position={[0.13, -0.25, 0]}>
+      <mesh material={limbMat} castShadow position={[0.13, -0.4, 0.15]}>
         <cylinderGeometry args={[0.06, 0.06, 0.4, 10]} />
       </mesh>
 

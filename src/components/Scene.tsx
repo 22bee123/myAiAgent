@@ -137,7 +137,17 @@ export function Scene() {
               onSelect={select}
               onHover={setHovered}
             />
-            <group position={agent.position}>
+            {/* Name tag group: must match the bot's seated position
+                (chair z-offset of 0.6) so the tag floats above the bot's
+                head, not above the desk. The tag itself is HTML and always
+                faces the camera, so no rotation needed here. */}
+            <group
+              position={[
+                agent.position[0],
+                agent.position[1],
+                agent.position[2] + 0.6,
+              ]}
+            >
               <BotTag id={agent.id} name={agent.name} color={agent.color} />
             </group>
           </group>
