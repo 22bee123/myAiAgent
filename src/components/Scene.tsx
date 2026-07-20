@@ -92,17 +92,22 @@ export function Scene() {
       {/* Adaptive resolution — keep things smooth on lower-end devices */}
       <AdaptiveDpr pixelated={false} />
 
-      {/* Scene background + base fog for depth perception */}
-      <color attach="background" args={["#05070d"]} />
-      <fog attach="fog" args={["#05070d", 14, 28]} />
+      {/* Scene background + base fog for depth perception.
+          Bright soft-gray background to match the white-office palette.
+          Fog is light and far so it doesn't muddy the foreground. */}
+      <color attach="background" args={["#f1f5f9"]} />
+      <fog attach="fog" args={["#f1f5f9", 18, 34]} />
 
       {/* ---- Lighting ---- */}
-      {/* Soft global fill so the unlit sides of objects aren't pitch black */}
-      <ambientLight intensity={0.45} />
-      {/* Key directional light — this is the only shadow caster */}
+      {/* Brighter ambient for the white room — light bounces off the walls
+          and fills shadows naturally, so we can use a higher ambient. */}
+      <ambientLight intensity={0.75} />
+      {/* Key directional light — this is the only shadow caster. Slightly
+          softer than before because the white surfaces already reflect
+          a lot of light. */}
       <directionalLight
         position={[6, 9, 5]}
-        intensity={1.4}
+        intensity={1.1}
         castShadow
         shadow-mapSize-width={2048}
         shadow-mapSize-height={2048}
@@ -114,14 +119,15 @@ export function Scene() {
         shadow-camera-far={30}
         shadow-bias={-0.0005}
       />
-      {/* Per-bot accent lights — they tint the immediate area in agent color,
-          so even from far away you can tell which workstation is which. */}
+      {/* Per-bot accent lights — softer now (the white walls amplify them).
+          Still tint each workstation in the agent's color so you can tell
+          the bots apart at a glance. */}
       {agents.map((a) => (
         <pointLight
           key={a.id}
           position={[a.position[0], 2.2, a.position[2]]}
           color={a.color}
-          intensity={1.2}
+          intensity={0.7}
           distance={4}
           decay={2}
         />
@@ -154,15 +160,16 @@ export function Scene() {
         ))}
 
         {/* Soft contact shadows under everything — much cheaper than full
-            shadow maps and looks great on a low-poly scene. */}
+            shadow maps. Opacity is lower than in the dark-office version
+            because on a light floor, even soft shadows read strongly. */}
         <ContactShadows
           position={[0, 0.005, 0]}
-          opacity={0.5}
+          opacity={0.32}
           scale={14}
-          blur={2.4}
+          blur={2.6}
           far={5}
           resolution={1024}
-          color="#000000"
+          color="#0f172a"
         />
       </Suspense>
 

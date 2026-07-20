@@ -35,36 +35,38 @@ const ROOM = {
 const WALL_THICKNESS = 0.2;
 
 // ---- Reusable materials (memoized so colors stay stable across renders) ---
+// White-office palette: light floors + walls, light wood desks, dark gray
+// office chairs, navy accent rug for contrast against the bright floor.
 function useMaterials() {
   return useMemo(
     () => ({
       floor: new THREE.MeshStandardMaterial({
-        color: "#1f2937",
-        roughness: 0.85,
-        metalness: 0.05,
+        color: "#e7e5e4", // warm light gray (office carpet / tile)
+        roughness: 0.9,
+        metalness: 0.02,
       }),
       wall: new THREE.MeshStandardMaterial({
-        color: "#0f172a",
-        roughness: 0.95,
+        color: "#fafaf9", // off-white (eggshell)
+        roughness: 0.98,
         metalness: 0.0,
       }),
       desk: new THREE.MeshStandardMaterial({
-        color: "#475569",
-        roughness: 0.6,
-        metalness: 0.15,
-      }),
-      deskLeg: new THREE.MeshStandardMaterial({
-        color: "#1e293b",
-        roughness: 0.7,
-        metalness: 0.2,
-      }),
-      chair: new THREE.MeshStandardMaterial({
-        color: "#0f172a",
-        roughness: 0.7,
+        color: "#d6d3d1", // light wood / white laminate
+        roughness: 0.55,
         metalness: 0.1,
       }),
+      deskLeg: new THREE.MeshStandardMaterial({
+        color: "#a8a29e", // brushed silver gray
+        roughness: 0.4,
+        metalness: 0.6,
+      }),
+      chair: new THREE.MeshStandardMaterial({
+        color: "#44403c", // dark gray fabric office chair
+        roughness: 0.85,
+        metalness: 0.05,
+      }),
       monitorFrame: new THREE.MeshStandardMaterial({
-        color: "#020617",
+        color: "#1c1917", // screens stay dark
         roughness: 0.5,
         metalness: 0.3,
       }),
@@ -75,16 +77,25 @@ function useMaterials() {
         roughness: 0.3,
       }),
       plantPot: new THREE.MeshStandardMaterial({
-        color: "#92400e",
-        roughness: 0.85,
+        color: "#fafaf9", // white ceramic pot
+        roughness: 0.6,
+        metalness: 0.05,
       }),
       plantLeaves: new THREE.MeshStandardMaterial({
-        color: "#15803d",
+        color: "#16a34a", // natural green
         roughness: 0.7,
       }),
       rug: new THREE.MeshStandardMaterial({
-        color: "#7c2d12",
+        color: "#1e293b", // navy/slate accent rug for contrast
         roughness: 0.95,
+      }),
+      // Ceiling strip lights — bright white emissive (was reusing monitor
+      // screen color before, which made them look cyan).
+      ceilingLight: new THREE.MeshStandardMaterial({
+        color: "#ffffff",
+        emissive: "#ffffff",
+        emissiveIntensity: 0.85,
+        roughness: 0.3,
       }),
     }),
     []
@@ -263,11 +274,12 @@ export function Office() {
       </mesh>
 
       {/* Ceiling strip lights (purely decorative — real light comes from
-          the actual <pointLight>s in Scene.tsx) */}
+          the actual <pointLight>s in Scene.tsx). Bright white emissive to
+          look like real office fluorescent panels. */}
       {[-3, 0, 3].map((x) => (
         <mesh
           key={x}
-          material={m.monitorScreen}
+          material={m.ceilingLight}
           position={[x, ROOM.height - 0.05, 0]}
         >
           <boxGeometry args={[2, 0.04, 0.4]} />
