@@ -1,31 +1,33 @@
 // ===========================================================================
 // components/CommandBot.tsx
 // ---------------------------------------------------------------------------
-// Standing variant of the Mecha Chameleon Bat, used in the 3D Command Center.
+// Seated Mecha Chameleon Bat character component for the 3D Command Center.
 //
-// Same visual design as Bot.tsx (chameleon turret eyes, bat ears, curled
-// tail, folded wings, office shirt + tie) but:
-//   - Stands upright (no chair offset, no seated pose)
-//   - Faces +Z (toward the camera) by default — no 180° rotation
-//   - Arms hang at the sides (not reaching forward to a keyboard)
-//   - Legs are vertical (standing, not sitting)
-//   - Takes a CommandAgent (from lib/commandAgents.ts) instead of AgentConfig
-//   - Clicking opens the chatbox filtered to the agent's channel
-//
-// Boss variant (tier === "boss"):
-//   - 1.3x scale
-//   - Floating gold crown above the head
-//   - Slightly stronger emissive glow
+// All 11 bots sit in their ergonomic workstation chairs in active working
+// poses:
+//   - "typing"          → Both arms extended forward, active alternating typing
+//   - "mouse_work"      → Left hand on keyboard, right hand micro-moving mouse
+//   - "coffee_break"    → Leaning back, right arm holding coffee mug near snout
+//   - "screen_pointing" → One hand on desk, right arm extended pointing at screen
+//   - "headset_call"    → Wearing headset over ears, head nodding on call
+//   - "boss_executive"  → Seated in executive chair with gold crown & headset
 // ===========================================================================
 
 "use client";
 
 import { useMemo, useRef, useState } from "react";
 import { useFrame, type ThreeEvent } from "@react-three/fiber";
-import { Html } from "@react-three/drei";
 import * as THREE from "three";
 import type { CommandAgent } from "@/lib/commandAgents";
 import { useCommandCenterStore } from "@/store/useCommandCenterStore";
+
+// Seated position constants relative to the workstation local space:
+// Workstation Chair is located at Z = 0.65. Bot sits at Y = 0.58 on chair seat.
+const CHAIR_Z_OFFSET = 0.65;
+const SITTING_Y = 0.58;
+
+// Forward arm tilt reaching toward keyboard
+const ARM_RESTING_TILT = -0.95;
 
 interface CommandBotProps {
   agent: CommandAgent;
@@ -33,22 +35,22 @@ interface CommandBotProps {
 
 export function CommandBot({ agent }: CommandBotProps) {
   const groupRef = useRef<THREE.Group>(null);
+  const headRef = useRef<THREE.Group>(null);
   const armLRef = useRef<THREE.Group>(null);
   const armRRef = useRef<THREE.Group>(null);
-  const headRef = useRef<THREE.Group>(null);
   const eyeLRef = useRef<THREE.Group>(null);
   const eyeRRef = useRef<THREE.Group>(null);
 
   const isBoss = agent.tier === "boss";
-  const scale = isBoss ? 1.3 : 1;
+  const scale = isBoss ? 1.25 : 1.0;
+  const pose = agent.poseType ?? "typing";
 
-  // Random phase offset so bots don't all bob in sync
   const phase = useMemo(() => Math.random() * Math.PI * 2, []);
   const [hovered, setHovered] = useState(false);
 
   const openChat = useCommandCenterStore((s) => s.openChat);
 
-  // ---- Materials (memoized) ----------------------------------------------
+  // ---- Materials ---------------------------------------------------------
   const mats = useMemo(() => {
     const c = new THREE.Color(agent.color);
     return {
@@ -100,52 +102,93 @@ export function CommandBot({ agent }: CommandBotProps) {
         emissiveIntensity: 0.7,
         roughness: 0.3,
       }),
-      // Boss-only: gold crown material
       crown: new THREE.MeshStandardMaterial({
         color: "#fbbf24",
         emissive: "#fbbf24",
-        emissiveIntensity: 0.4,
+        emissiveIntensity: 0.5,
         roughness: 0.2,
         metalness: 0.9,
+      }),
+      mug: new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 0.4 }),
+      coffee: new THREE.MeshStandardMaterial({ color: "#451a03", roughness: 0.3 }),
+      headset: new THREE.MeshStandardMaterial({
+        color: "#0f172a",
+        roughness: 0.3,
+        metalness: 0.8,
       }),
     };
   }, [agent.color, isBoss]);
 
-  // ---- Animation loop -----------------------------------------------------
+  // ---- Per-frame animation driven by Pose --------------------------------
   useFrame((state) => {
     const t = state.clock.elapsedTime + phase;
+
+    // Seated breathing bobbing
     if (groupRef.current) {
-      // Idle bobbing — slightly more pronounced for the boss
-      const amp = isBoss ? 0.06 : 0.04;
-      groupRef.current.position.y =
-        agent.position[1] + Math.sin(t * 1.5) * amp;
+      const bob = Math.sin(t * 1.5) * 0.025;
+      groupRef.current.position.y = SITTING_Y + bob;
     }
-    // Subtle head tilt
+
+    // Head animation
     if (headRef.current) {
-      headRef.current.rotation.z = Math.sin(t * 0.7) * 0.08;
+      if (pose === "headset_call") {
+        // Gentle rhythmic head nod on call
+        headRef.current.rotation.x = Math.sin(t * 3) * 0.06;
+        headRef.current.rotation.y = Math.sin(t * 1.2) * 0.1;
+      } else {
+        headRef.current.rotation.z = Math.sin(t * 0.7) * 0.06;
+        headRef.current.rotation.y = Math.sin(t * 0.4) * 0.08;
+      }
     }
-    // Gentle arm sway (much subtler than the typing motion in Bot.tsx)
-    const sway = Math.sin(t * 1.2) * 0.05;
-    if (armLRef.current) armLRef.current.rotation.x = 0.1 + sway;
-    if (armRRef.current) armRRef.current.rotation.x = 0.1 - sway;
-    // Chameleon eyes — independent slow swivel
-    if (eyeLRef.current) {
-      eyeLRef.current.rotation.y = Math.sin(t * 0.5) * 0.7;
+
+    // Chameleon eyes swivel
+    if (eyeLRef.current) eyeLRef.current.rotation.y = Math.sin(t * 0.5) * 0.6;
+    if (eyeRRef.current) eyeRRef.current.rotation.y = Math.sin(t * 0.5 + 1.7) * 0.6;
+
+    // Arm animations per pose type
+    if (armLRef.current && armRRef.current) {
+      if (pose === "typing" || pose === "boss_executive") {
+        // Fast alternating typing swing
+        const typeL = Math.sin(t * 7) * 0.14;
+        const typeR = Math.sin(t * 7 + 0.4) * 0.14;
+        armLRef.current.rotation.x = ARM_RESTING_TILT + typeL;
+        armRRef.current.rotation.x = ARM_RESTING_TILT + typeR;
+      } else if (pose === "mouse_work") {
+        // Left hand typing, Right hand micro-moving mouse
+        const typeL = Math.sin(t * 5) * 0.1;
+        const mouseR = Math.sin(t * 4) * 0.05;
+        armLRef.current.rotation.x = ARM_RESTING_TILT + typeL;
+        armRRef.current.rotation.x = ARM_RESTING_TILT + 0.1;
+        armRRef.current.rotation.z = -0.1 + mouseR;
+      } else if (pose === "coffee_break") {
+        // Left hand on desk, Right hand raising coffee mug near snout
+        armLRef.current.rotation.x = ARM_RESTING_TILT;
+        armRRef.current.rotation.x = -1.8 + Math.sin(t * 1.5) * 0.08;
+        armRRef.current.rotation.y = -0.4;
+      } else if (pose === "screen_pointing") {
+        // Left hand typing, Right hand extended pointing up at screen
+        armLRef.current.rotation.x = ARM_RESTING_TILT + Math.sin(t * 6) * 0.1;
+        armRRef.current.rotation.x = -0.4 + Math.sin(t * 2) * 0.06;
+        armRRef.current.rotation.y = 0.2;
+      } else if (pose === "headset_call") {
+        // Left arm touching headset ear, Right hand on desk
+        armLRef.current.rotation.x = -1.9;
+        armLRef.current.rotation.y = 0.5;
+        armRRef.current.rotation.x = ARM_RESTING_TILT;
+      }
     }
-    if (eyeRRef.current) {
-      eyeRRef.current.rotation.y = Math.sin(t * 0.5 + 1.7) * 0.7;
-    }
-    // Smooth emissive glow on hover
-    const target = hovered ? (isBoss ? 0.7 : 0.5) : isBoss ? 0.25 : 0.15;
+
+    // Hover glow transition
+    const targetIntensity = hovered ? (isBoss ? 0.7 : 0.5) : isBoss ? 0.25 : 0.15;
     // eslint-disable-next-line react-hooks/immutability
     mats.mechaBody.emissiveIntensity = THREE.MathUtils.lerp(
       mats.mechaBody.emissiveIntensity,
-      target,
+      targetIntensity,
       0.15
     );
   });
 
-  // ---- Pointer handlers ---------------------------------------------------
+  // Pointer interactions
   const handleOver = (e: ThreeEvent<PointerEvent>) => {
     e.stopPropagation();
     setHovered(true);
@@ -158,11 +201,10 @@ export function CommandBot({ agent }: CommandBotProps) {
   };
   const handleClick = (e: ThreeEvent<MouseEvent>) => {
     e.stopPropagation();
-    // Boss click → open unified feed (no filter); others → filtered to channel
     openChat(isBoss ? null : (agent.channel as never));
   };
 
-  // ---- Tail curve (precomputed) ------------------------------------------
+  // Precomputed chameleon tail curve
   const tailSegments = useMemo(
     () =>
       Array.from({ length: 7 }).map((_, i) => {
@@ -182,276 +224,260 @@ export function CommandBot({ agent }: CommandBotProps) {
 
   return (
     <group
-      ref={groupRef}
       position={agent.position}
-      scale={[scale, scale, scale]}
-      onPointerOver={handleOver}
-      onPointerOut={handleOut}
-      onClick={handleClick}
+      rotation={[0, agent.rotationY, 0]}
     >
-      {/* ============ HEAD GROUP ============ */}
-      <group ref={headRef} position={[0, 0.95, 0]}>
-        <mesh material={mats.mechaBody} castShadow>
-          <boxGeometry args={[0.36, 0.32, 0.36]} />
-        </mesh>
-        {/* Snout — faces +Z (toward camera) */}
-        <mesh material={mats.mechaBody} castShadow position={[0, -0.02, 0.22]}>
-          <boxGeometry args={[0.18, 0.14, 0.12]} />
-        </mesh>
-
-        {/* Turret eyes — bulging spheres on the sides */}
-        <group ref={eyeLRef} position={[-0.2, 0.08, 0.05]}>
-          <mesh material={mats.eye} castShadow>
-            <sphereGeometry args={[0.11, 16, 16]} />
+      {/* Bot group is placed at local workstation chair position [0, SITTING_Y, CHAIR_Z_OFFSET]
+          and rotated 180° (Math.PI) so it faces local -Z (toward the desk & screens). */}
+      <group
+        ref={groupRef}
+        position={[0, SITTING_Y, CHAIR_Z_OFFSET]}
+        rotation={[0, Math.PI, 0]}
+        scale={[scale, scale, scale]}
+        onPointerOver={handleOver}
+        onPointerOut={handleOut}
+        onClick={handleClick}
+      >
+        {/* ============ HEAD GROUP ============ */}
+        <group ref={headRef} position={[0, 0.55, 0]}>
+          {/* Main Mecha Head Box */}
+          <mesh material={mats.mechaBody} castShadow>
+            <boxGeometry args={[0.36, 0.32, 0.36]} />
           </mesh>
-          <mesh material={mats.pupil} position={[0, 0, 0.09]}>
-            <sphereGeometry args={[0.045, 12, 12]} />
+          {/* Snout extending forward (+Z local = facing desk) */}
+          <mesh material={mats.mechaBody} castShadow position={[0, -0.02, 0.22]}>
+            <boxGeometry args={[0.18, 0.14, 0.12]} />
           </mesh>
-        </group>
-        <group ref={eyeRRef} position={[0.2, 0.08, 0.05]}>
-          <mesh material={mats.eye} castShadow>
-            <sphereGeometry args={[0.11, 16, 16]} />
-          </mesh>
-          <mesh material={mats.pupil} position={[0, 0, 0.09]}>
-            <sphereGeometry args={[0.045, 12, 12]} />
-          </mesh>
-        </group>
 
-        {/* Bat ears */}
-        <mesh
-          material={mats.dark}
-          castShadow
-          position={[-0.12, 0.24, -0.04]}
-          rotation={[-0.3, 0, -0.1]}
-        >
-          <coneGeometry args={[0.06, 0.16, 8]} />
-        </mesh>
-        <mesh
-          material={mats.dark}
-          castShadow
-          position={[0.12, 0.24, -0.04]}
-          rotation={[-0.3, 0, 0.1]}
-        >
-          <coneGeometry args={[0.06, 0.16, 8]} />
-        </mesh>
-
-        {/* Antenna with glowing tip */}
-        <mesh material={mats.dark} position={[0, 0.3, 0.06]} rotation={[0.3, 0, 0]}>
-          <cylinderGeometry args={[0.008, 0.008, 0.18, 6]} />
-        </mesh>
-        <mesh material={mats.screen} position={[0, 0.4, 0.11]}>
-          <sphereGeometry args={[0.03, 12, 12]} />
-        </mesh>
-
-        {/* Boss-only: floating gold crown above the head */}
-        {isBoss && (
-          <group position={[0, 0.62, 0]}>
-            {/* Crown base ring */}
-            <mesh material={mats.crown} castShadow rotation={[Math.PI / 2, 0, 0]}>
-              <cylinderGeometry args={[0.16, 0.16, 0.08, 8]} />
+          {/* Chameleon Turret Eyes */}
+          <group ref={eyeLRef} position={[-0.2, 0.08, 0.05]}>
+            <mesh material={mats.eye} castShadow>
+              <sphereGeometry args={[0.11, 16, 16]} />
             </mesh>
-            {/* Crown points (5 cones around the top) */}
-            {[0, 1, 2, 3, 4].map((i) => {
-              const a = (i / 5) * Math.PI * 2;
-              return (
-                <mesh
-                  key={i}
-                  material={mats.crown}
-                  castShadow
-                  position={[Math.cos(a) * 0.16, 0.1, Math.sin(a) * 0.16]}
-                >
-                  <coneGeometry args={[0.04, 0.12, 6]} />
-                </mesh>
-              );
-            })}
-            {/* Jewel on each point */}
-            {[0, 1, 2, 3, 4].map((i) => {
-              const a = (i / 5) * Math.PI * 2;
-              return (
-                <mesh
-                  key={`j${i}`}
-                  material={mats.screen}
-                  position={[Math.cos(a) * 0.16, 0.18, Math.sin(a) * 0.16]}
-                >
-                  <sphereGeometry args={[0.025, 8, 8]} />
-                </mesh>
-              );
-            })}
+            <mesh material={mats.pupil} position={[0, 0, 0.09]}>
+              <sphereGeometry args={[0.045, 12, 12]} />
+            </mesh>
           </group>
-        )}
-      </group>
+          <group ref={eyeRRef} position={[0.2, 0.08, 0.05]}>
+            <mesh material={mats.eye} castShadow>
+              <sphereGeometry args={[0.11, 16, 16]} />
+            </mesh>
+            <mesh material={mats.pupil} position={[0, 0, 0.09]}>
+              <sphereGeometry args={[0.045, 12, 12]} />
+            </mesh>
+          </group>
 
-      {/* ============ NECK ============ */}
-      <mesh material={mats.dark} position={[0, 0.76, 0]}>
-        <cylinderGeometry args={[0.07, 0.08, 0.1, 8]} />
-      </mesh>
+          {/* Pointed Bat Ears */}
+          <mesh
+            material={mats.dark}
+            castShadow
+            position={[-0.12, 0.24, -0.04]}
+            rotation={[-0.3, 0, -0.1]}
+          >
+            <coneGeometry args={[0.06, 0.16, 8]} />
+          </mesh>
+          <mesh
+            material={mats.dark}
+            castShadow
+            position={[0.12, 0.24, -0.04]}
+            rotation={[-0.3, 0, 0.1]}
+          >
+            <coneGeometry args={[0.06, 0.16, 8]} />
+          </mesh>
 
-      {/* ============ TORSO (office shirt) ============ */}
-      <mesh material={mats.shirt} castShadow position={[0, 0.55, 0]}>
-        <boxGeometry args={[0.52, 0.55, 0.36]} />
-      </mesh>
-      {/* Collar */}
-      <mesh
-        material={mats.shirt}
-        castShadow
-        position={[-0.07, 0.8, 0.1]}
-        rotation={[0.4, 0, -0.3]}
-      >
-        <boxGeometry args={[0.1, 0.04, 0.16]} />
-      </mesh>
-      <mesh
-        material={mats.shirt}
-        castShadow
-        position={[0.07, 0.8, 0.1]}
-        rotation={[0.4, 0, 0.3]}
-      >
-        <boxGeometry args={[0.1, 0.04, 0.16]} />
-      </mesh>
-      {/* Tie knot + tie */}
-      <mesh material={mats.tie} castShadow position={[0, 0.76, 0.19]}>
-        <boxGeometry args={[0.08, 0.06, 0.03]} />
-      </mesh>
-      <mesh material={mats.tie} castShadow position={[0, 0.58, 0.19]}>
-        <boxGeometry args={[0.06, 0.3, 0.02]} />
-      </mesh>
-      {/* Buttons */}
-      {[0.45, 0.53, 0.61, 0.69].map((y, i) => (
-        <mesh key={i} material={mats.dark} position={[0.08, y, 0.19]}>
-          <sphereGeometry args={[0.012, 8, 8]} />
-        </mesh>
-      ))}
-      {/* Chest pocket */}
-      <mesh material={mats.shirt} position={[-0.15, 0.62, 0.19]}>
-        <boxGeometry args={[0.08, 0.08, 0.01]} />
-      </mesh>
+          {/* Glowing Antenna Tip */}
+          <mesh material={mats.dark} position={[0, 0.3, 0.06]} rotation={[0.3, 0, 0]}>
+            <cylinderGeometry args={[0.008, 0.008, 0.18, 6]} />
+          </mesh>
+          <mesh material={mats.screen} position={[0, 0.4, 0.11]}>
+            <sphereGeometry args={[0.03, 12, 12]} />
+          </mesh>
 
-      {/* Tier badge on the chest (M for Master, S for Sub) — small colored
-          square on the right chest so you can tell master vs sub apart at
-          a glance. Boss has no badge (the crown is enough). */}
-      {!isBoss && (
-        <mesh position={[0.15, 0.62, 0.19]} material={mats.screen}>
-          <boxGeometry args={[0.06, 0.06, 0.01]} />
-        </mesh>
-      )}
+          {/* Headset accessory for headset_call or boss */}
+          {(pose === "headset_call" || isBoss) && (
+            <group position={[0, 0.1, 0]}>
+              {/* Headband */}
+              <mesh material={mats.headset} rotation={[0, 0, Math.PI / 2]}>
+                <torusGeometry args={[0.2, 0.015, 8, 16, Math.PI]} />
+              </mesh>
+              {/* Ear cup left */}
+              <mesh material={mats.headset} position={[-0.21, 0, 0.05]}>
+                <boxGeometry args={[0.04, 0.12, 0.1]} />
+              </mesh>
+              {/* Ear cup right */}
+              <mesh material={mats.headset} position={[0.21, 0, 0.05]}>
+                <boxGeometry args={[0.04, 0.12, 0.1]} />
+              </mesh>
+              {/* Microphone boom */}
+              <mesh material={mats.headset} position={[-0.18, -0.08, 0.18]} rotation={[0.4, 0.3, 0]}>
+                <cylinderGeometry args={[0.008, 0.008, 0.18, 8]} />
+              </mesh>
+            </group>
+          )}
 
-      {/* ============ ARMS (hanging at sides) ============ */}
-      {/* Arms pivot at the shoulder and hang down. Gentle sway via useFrame. */}
-      <group ref={armLRef} position={[-0.3, 0.72, 0]} rotation={[0.1, 0, 0]}>
-        <mesh material={mats.shirt} castShadow position={[0, -0.16, 0]}>
-          <cylinderGeometry args={[0.07, 0.06, 0.32, 10]} />
-        </mesh>
-        <mesh material={mats.dark} castShadow position={[0, -0.33, 0]}>
-          <cylinderGeometry args={[0.062, 0.062, 0.04, 10]} />
-        </mesh>
-        <mesh material={mats.mechaBody} castShadow position={[0, -0.37, 0]}>
-          <cylinderGeometry args={[0.045, 0.04, 0.06, 10]} />
-        </mesh>
-        <mesh material={mats.dark} castShadow position={[0, -0.42, 0]}>
-          <boxGeometry args={[0.07, 0.04, 0.06]} />
-        </mesh>
-      </group>
-      <group ref={armRRef} position={[0.3, 0.72, 0]} rotation={[0.1, 0, 0]}>
-        <mesh material={mats.shirt} castShadow position={[0, -0.16, 0]}>
-          <cylinderGeometry args={[0.07, 0.06, 0.32, 10]} />
-        </mesh>
-        <mesh material={mats.dark} castShadow position={[0, -0.33, 0]}>
-          <cylinderGeometry args={[0.062, 0.062, 0.04, 10]} />
-        </mesh>
-        <mesh material={mats.mechaBody} castShadow position={[0, -0.37, 0]}>
-          <cylinderGeometry args={[0.045, 0.04, 0.06, 10]} />
-        </mesh>
-        <mesh material={mats.dark} castShadow position={[0, -0.42, 0]}>
-          <boxGeometry args={[0.07, 0.04, 0.06]} />
-        </mesh>
-      </group>
+          {/* Boss Floating Gold Crown */}
+          {isBoss && (
+            <group position={[0, 0.62, 0]}>
+              <mesh material={mats.crown} castShadow rotation={[Math.PI / 2, 0, 0]}>
+                <cylinderGeometry args={[0.16, 0.16, 0.08, 8]} />
+              </mesh>
+              {[0, 1, 2, 3, 4].map((i) => {
+                const a = (i / 5) * Math.PI * 2;
+                return (
+                  <mesh
+                    key={i}
+                    material={mats.crown}
+                    castShadow
+                    position={[Math.cos(a) * 0.16, 0.1, Math.sin(a) * 0.16]}
+                  >
+                    <coneGeometry args={[0.04, 0.12, 6]} />
+                  </mesh>
+                );
+              })}
+            </group>
+          )}
+        </group>
 
-      {/* ============ LEGS (standing) ============ */}
-      {/* Two vertical legs going from hip to floor */}
-      <mesh material={mats.mechaBody} castShadow position={[-0.13, 0.15, 0]}>
-        <cylinderGeometry args={[0.07, 0.06, 0.45, 10]} />
-      </mesh>
-      <mesh material={mats.mechaBody} castShadow position={[0.13, 0.15, 0]}>
-        <cylinderGeometry args={[0.07, 0.06, 0.45, 10]} />
-      </mesh>
-      {/* Knee joints */}
-      <mesh material={mats.dark} position={[-0.13, 0.15, 0.06]}>
-        <sphereGeometry args={[0.05, 10, 10]} />
-      </mesh>
-      <mesh material={mats.dark} position={[0.13, 0.15, 0.06]}>
-        <sphereGeometry args={[0.05, 10, 10]} />
-      </mesh>
-      {/* Feet — flat boxes on the floor */}
-      <mesh material={mats.dark} castShadow position={[-0.13, -0.08, 0.05]}>
-        <boxGeometry args={[0.12, 0.06, 0.2]} />
-      </mesh>
-      <mesh material={mats.dark} castShadow position={[0.13, -0.08, 0.05]}>
-        <boxGeometry args={[0.12, 0.06, 0.2]} />
-      </mesh>
+        {/* ============ TORSO (Office Shirt + Tie) ============ */}
+        <mesh material={mats.dark} position={[0, 0.36, 0]}>
+          <cylinderGeometry args={[0.07, 0.08, 0.1, 8]} />
+        </mesh>
+        <mesh material={mats.shirt} castShadow position={[0, 0.15, 0]}>
+          <boxGeometry args={[0.52, 0.55, 0.36]} />
+        </mesh>
 
-      {/* ============ TAIL (curled chameleon tail, behind) ============ */}
-      {tailSegments.map((seg, i) => (
+        {/* Collar & Tie */}
         <mesh
-          key={i}
+          material={mats.shirt}
+          castShadow
+          position={[-0.07, 0.4, 0.1]}
+          rotation={[0.4, 0, -0.3]}
+        >
+          <boxGeometry args={[0.1, 0.04, 0.16]} />
+        </mesh>
+        <mesh
+          material={mats.shirt}
+          castShadow
+          position={[0.07, 0.4, 0.1]}
+          rotation={[0.4, 0, 0.3]}
+        >
+          <boxGeometry args={[0.1, 0.04, 0.16]} />
+        </mesh>
+        <mesh material={mats.tie} castShadow position={[0, 0.36, 0.19]}>
+          <boxGeometry args={[0.08, 0.06, 0.03]} />
+        </mesh>
+        <mesh material={mats.tie} castShadow position={[0, 0.18, 0.19]}>
+          <boxGeometry args={[0.06, 0.3, 0.02]} />
+        </mesh>
+
+        {/* ============ ARMS (Posed per PoseType) ============ */}
+        <group ref={armLRef} position={[-0.3, 0.32, 0]}>
+          <mesh material={mats.shirt} castShadow position={[0, -0.16, 0]}>
+            <cylinderGeometry args={[0.07, 0.06, 0.32, 10]} />
+          </mesh>
+          <mesh material={mats.dark} castShadow position={[0, -0.33, 0]}>
+            <cylinderGeometry args={[0.062, 0.062, 0.04, 10]} />
+          </mesh>
+          <mesh material={mats.mechaBody} castShadow position={[0, -0.37, 0]}>
+            <cylinderGeometry args={[0.045, 0.04, 0.06, 10]} />
+          </mesh>
+          <mesh material={mats.dark} castShadow position={[0, -0.42, 0]}>
+            <boxGeometry args={[0.07, 0.04, 0.06]} />
+          </mesh>
+        </group>
+
+        <group ref={armRRef} position={[0.3, 0.32, 0]}>
+          <mesh material={mats.shirt} castShadow position={[0, -0.16, 0]}>
+            <cylinderGeometry args={[0.07, 0.06, 0.32, 10]} />
+          </mesh>
+          <mesh material={mats.dark} castShadow position={[0, -0.33, 0]}>
+            <cylinderGeometry args={[0.062, 0.062, 0.04, 10]} />
+          </mesh>
+          <mesh material={mats.mechaBody} castShadow position={[0, -0.37, 0]}>
+            <cylinderGeometry args={[0.045, 0.04, 0.06, 10]} />
+          </mesh>
+          <mesh material={mats.dark} castShadow position={[0, -0.42, 0]}>
+            <boxGeometry args={[0.07, 0.04, 0.06]} />
+          </mesh>
+
+          {/* Coffee Mug in Right Hand for coffee_break pose */}
+          {pose === "coffee_break" && (
+            <group position={[0, -0.44, 0.08]}>
+              <mesh material={mats.mug} castShadow>
+                <cylinderGeometry args={[0.04, 0.035, 0.08, 12]} />
+              </mesh>
+              <mesh material={mats.coffee} position={[0, 0.035, 0]}>
+                <cylinderGeometry args={[0.034, 0.034, 0.005, 12]} />
+              </mesh>
+            </group>
+          )}
+        </group>
+
+        {/* ============ SEATED LEGS ============ */}
+        {/* Thighs extended horizontally forward resting on chair */}
+        <mesh
           material={mats.mechaBody}
           castShadow
-          position={seg.pos}
+          position={[-0.13, -0.05, 0.12]}
+          rotation={[Math.PI / 2, 0, 0]}
         >
-          <sphereGeometry args={[seg.size, 12, 12]} />
+          <cylinderGeometry args={[0.06, 0.06, 0.22, 10]} />
         </mesh>
-      ))}
-      <mesh material={mats.screen} position={[0.05, -0.32, -0.2]}>
-        <sphereGeometry args={[0.022, 12, 12]} />
-      </mesh>
+        <mesh
+          material={mats.mechaBody}
+          castShadow
+          position={[0.13, -0.05, 0.12]}
+          rotation={[Math.PI / 2, 0, 0]}
+        >
+          <cylinderGeometry args={[0.06, 0.06, 0.22, 10]} />
+        </mesh>
+        {/* Lower Legs going down to floor */}
+        <mesh material={mats.mechaBody} castShadow position={[-0.13, -0.32, 0.22]}>
+          <cylinderGeometry args={[0.05, 0.04, 0.5, 10]} />
+        </mesh>
+        <mesh material={mats.mechaBody} castShadow position={[0.13, -0.32, 0.22]}>
+          <cylinderGeometry args={[0.05, 0.04, 0.5, 10]} />
+        </mesh>
+        {/* Chameleon Sticky Paddle Feet flat on floor */}
+        <mesh material={mats.dark} castShadow position={[-0.13, -0.58, 0.24]}>
+          <boxGeometry args={[0.1, 0.04, 0.16]} />
+        </mesh>
+        <mesh material={mats.dark} castShadow position={[0.13, -0.58, 0.24]}>
+          <boxGeometry args={[0.1, 0.04, 0.16]} />
+        </mesh>
 
-      {/* ============ BAT WINGS (folded on back) ============ */}
-      <group position={[0, 0.58, -0.18]}>
-        <mesh
-          material={mats.wing}
-          castShadow
-          position={[-0.1, 0.05, 0]}
-          rotation={[0, -0.5, 0.4]}
-        >
-          <boxGeometry args={[0.02, 0.25, 0.22]} />
-        </mesh>
-        <mesh
-          material={mats.wing}
-          castShadow
-          position={[0.1, 0.05, 0]}
-          rotation={[0, 0.5, -0.4]}
-        >
-          <boxGeometry args={[0.02, 0.25, 0.22]} />
-        </mesh>
+        {/* ============ CURLED CHAMELEON TAIL ============ */}
+        {tailSegments.map((seg, i) => (
+          <mesh
+            key={i}
+            material={mats.mechaBody}
+            castShadow
+            position={seg.pos}
+          >
+            <sphereGeometry args={[seg.size, 12, 12]} />
+          </mesh>
+        ))}
+
+        {/* ============ FOLDED BAT WINGS ============ */}
+        <group position={[0, 0.18, -0.18]}>
+          <mesh
+            material={mats.wing}
+            castShadow
+            position={[-0.1, 0.05, 0]}
+            rotation={[0, -0.5, 0.4]}
+          >
+            <boxGeometry args={[0.02, 0.25, 0.22]} />
+          </mesh>
+          <mesh
+            material={mats.wing}
+            castShadow
+            position={[0.1, 0.05, 0]}
+            rotation={[0, 0.5, -0.4]}
+          >
+            <boxGeometry args={[0.02, 0.25, 0.22]} />
+          </mesh>
+        </group>
       </group>
-
-      {/* ============ FLOATING NAME TAG (HTML, always faces camera) ============ */}
-      <Html
-        center
-        distanceFactor={10}
-        position={[0, isBoss ? 2.1 : 1.6, 0]}
-        style={{ pointerEvents: "none" }}
-      >
-        <div
-          style={{
-            padding: "3px 10px",
-            borderRadius: 8,
-            fontSize: isBoss ? 14 : 11,
-            fontWeight: 700,
-            whiteSpace: "nowrap",
-            transform: "translateY(-50%)",
-            background: isBoss ? agent.color : "rgba(15, 23, 42, 0.85)",
-            color: isBoss ? "#0b1120" : "#e2e8f0",
-            border: `1px solid ${agent.color}`,
-            boxShadow: isBoss
-              ? `0 0 20px ${agent.color}`
-              : `0 0 8px ${agent.color}55`,
-            fontFamily:
-              "ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif",
-            letterSpacing: 0.2,
-          }}
-        >
-          {agent.emoji} {agent.name}
-        </div>
-      </Html>
     </group>
   );
 }

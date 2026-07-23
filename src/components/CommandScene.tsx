@@ -1,36 +1,22 @@
 // ===========================================================================
 // components/CommandScene.tsx
 // ---------------------------------------------------------------------------
-// 3D scene for the Command Center. Marked "use client" because Three.js
-// needs the browser.
+// 3D Scene for the Tech Startup Office AI Agent Command Center.
 //
-// Layout (top-down view of the room, X = left/right, Z = front/back):
-//
-//                  back wall (z = -6)
-//   ┌──────────────────────────────────────────┐
-//   │                                          │
-//   │                  👑 Boss                  │   z = -4.5 (elevated)
-//   │                    │                     │
-//   │       ╱  ╱  │  ╲  ╲                      │
-//   │      ╱  ╱   │   ╲  ╲                     │
-//   │   📧  🛒  📱  🛍️  📘   ← masters         │   z = -1.5
-//   │    │    │   │   │    │                   │
-//   │    │    │   │   │    │                   │
-//   │   📧  🛒  📱  🛍️  📘   ← subs            │   z = +1.5
-//   │                                          │
-//   │              (camera looks this way)     │
-//   └──────────────────────────────────────────┘
-//                  front (z = +6, open — no wall)
-//
-// Boss is on a raised circular platform at the back. 5 master bots stand
-// in a row across the middle. 5 sub bots stand in a row across the front.
-// Glowing colored lines connect Boss → each Master, and each Master → its
-// Sub, so the hierarchy is visually obvious from any angle.
+// Composition:
+//   - <OfficeEnvironment />  ← 3D architectural shell, glass Boss office,
+//                               5 pods, central lounge, server rack & decor
+//   - <WorkstationDesk />    ← 11 desks, ergonomic chairs, dual/triple screens,
+//                               clutter, CPU towers, trash bins
+//   - <CommandBot />          ← 11 bots seated in working poses
+//   - <Connectors />          ← Hierarchy conduits Boss → Masters → Subs
+//   - <SlackPresenceTags />   ← Minimal Slack-style presence tags attached
+//                               above monitor screens
 // ===========================================================================
 
 "use client";
 
-import { Suspense, useMemo } from "react";
+import { Suspense } from "react";
 import { Canvas } from "@react-three/fiber";
 import {
   OrbitControls,
@@ -46,181 +32,33 @@ import {
   MASTER_AGENTS,
   SUB_AGENTS,
   CHANNEL_META,
+  ALL_AGENTS,
   type CommandAgent,
 } from "@/lib/commandAgents";
 import { useCommandCenterStore } from "@/store/useCommandCenterStore";
 import { CommandBot } from "@/components/CommandBot";
-
-// ---- Room dimensions ------------------------------------------------------
-const ROOM = {
-  width: 16,
-  depth: 14,
-  height: 4.5,
-};
-const WALL_THICKNESS = 0.2;
-
-// ---- Reusable materials (memoized) ---------------------------------------
-function useRoomMaterials() {
-  return useMemo(
-    () => ({
-      floor: new THREE.MeshStandardMaterial({
-        color: "#e7e5e4",
-        roughness: 0.9,
-        metalness: 0.02,
-      }),
-      wall: new THREE.MeshStandardMaterial({
-        color: "#fafaf9",
-        roughness: 0.98,
-        metalness: 0.0,
-      }),
-      platform: new THREE.MeshStandardMaterial({
-        color: "#1e293b",
-        roughness: 0.6,
-        metalness: 0.3,
-      }),
-      platformGlow: new THREE.MeshStandardMaterial({
-        color: "#fbbf24",
-        emissive: "#fbbf24",
-        emissiveIntensity: 0.6,
-        roughness: 0.4,
-      }),
-      windowFrame: new THREE.MeshStandardMaterial({
-        color: "#fafaf9",
-        roughness: 0.6,
-      }),
-      glass: new THREE.MeshPhysicalMaterial({
-        color: "#bae6fd",
-        transparent: true,
-        opacity: 0.18,
-        roughness: 0.05,
-        transmission: 0.85,
-        thickness: 0.05,
-        ior: 1.45,
-      }),
-      sky: new THREE.MeshStandardMaterial({
-        color: "#7dd3fc",
-        emissive: "#7dd3fc",
-        emissiveIntensity: 0.35,
-        roughness: 1.0,
-      }),
-      ceilingLight: new THREE.MeshStandardMaterial({
-        color: "#ffffff",
-        emissive: "#ffffff",
-        emissiveIntensity: 0.85,
-        roughness: 0.3,
-      }),
-    }),
-    []
-  );
-}
-
-// ---- Boss platform (raised circular disk at the back) --------------------
-function BossPlatform() {
-  const m = useRoomMaterials();
-  return (
-    <group position={[BOSS.position[0], 0, BOSS.position[2]]}>
-      {/* Cylindrical platform */}
-      <mesh material={m.platform} castShadow receiveShadow position={[0, 0.2, 0]}>
-        <cylinderGeometry args={[1.2, 1.4, 0.4, 32]} />
-      </mesh>
-      {/* Glowing ring on top of the platform — gold to match the boss */}
-      <mesh
-        material={m.platformGlow}
-        position={[0, 0.41, 0]}
-        rotation={[-Math.PI / 2, 0, 0]}
-      >
-        <ringGeometry args={[1.05, 1.15, 32]} />
-      </mesh>
-      {/* Step in front of the platform — like a small throne dais */}
-      <mesh material={m.platform} castShadow receiveShadow position={[0, 0.1, 1.1]}>
-        <boxGeometry args={[2, 0.2, 0.6]} />
-      </mesh>
-    </group>
-  );
-}
-
-// ---- Window on the back wall (reuse the design from Office.tsx) ----------
-function WindowOnWall({
-  position,
-  width = 4,
-  height = 2,
-}: {
-  position: [number, number, number];
-  width?: number;
-  height?: number;
-}) {
-  const m = useRoomMaterials();
-  return (
-    <group position={position}>
-      <mesh material={m.sky} position={[0, 0, -0.18]}>
-        <planeGeometry args={[width + 1, height + 1]} />
-      </mesh>
-      <mesh material={m.glass} position={[0, 0, 0.01]}>
-        <planeGeometry args={[width, height]} />
-      </mesh>
-      {/* Frame: 4 sides */}
-      <mesh
-        material={m.windowFrame}
-        castShadow
-        position={[0, height / 2 + 0.04, 0]}
-      >
-        <boxGeometry args={[width + 0.16, 0.08, 0.1]} />
-      </mesh>
-      <mesh
-        material={m.windowFrame}
-        castShadow
-        position={[0, -height / 2 - 0.04, 0.02]}
-      >
-        <boxGeometry args={[width + 0.26, 0.1, 0.16]} />
-      </mesh>
-      <mesh
-        material={m.windowFrame}
-        castShadow
-        position={[-width / 2 - 0.04, 0, 0]}
-      >
-        <boxGeometry args={[0.08, height, 0.1]} />
-      </mesh>
-      <mesh
-        material={m.windowFrame}
-        castShadow
-        position={[width / 2 + 0.04, 0, 0]}
-      >
-        <boxGeometry args={[0.08, height, 0.1]} />
-      </mesh>
-      {/* Cross mullions */}
-      <mesh material={m.windowFrame} position={[0, 0, 0.02]}>
-        <boxGeometry args={[width, 0.04, 0.04]} />
-      </mesh>
-      <mesh material={m.windowFrame} position={[0, 0, 0.02]}>
-        <boxGeometry args={[0.04, height, 0.04]} />
-      </mesh>
-    </group>
-  );
-}
+import { WorkstationDesk } from "@/components/WorkstationDesk";
+import { OfficeEnvironment } from "@/components/OfficeEnvironment";
 
 // ---- Connector lines: Boss → Masters, Master → Sub -----------------------
-// Glowing colored lines that show the reporting hierarchy. Each line is a
-// drei <Line> which renders a thin tube between two points.
 function Connectors() {
-  // Lines from Boss to each Master (5 lines fanning out)
+  // Lines from Boss to each Master (5 conduits fanning out from glass office)
   const bossToMasterLines = MASTER_AGENTS.map((master) => ({
     color: master.color,
     points: [
-      // Start at the boss's chest height (y = 0.4 platform + 0.55 chest)
-      [BOSS.position[0], 0.95, BOSS.position[2]] as [number, number, number],
-      // End at the master's chest height
-      [master.position[0], 0.55, master.position[2]] as [number, number, number],
+      [BOSS.position[0], 1.2, BOSS.position[2]] as [number, number, number],
+      [master.position[0], 0.8, master.position[2]] as [number, number, number],
     ],
   }));
 
-  // Lines from each Master to its Sub (5 vertical-ish lines)
+  // Lines from each Master to its Sub
   const masterToSubLines = MASTER_AGENTS.map((master, i) => {
     const sub = SUB_AGENTS[i];
     return {
       color: master.color,
       points: [
-        [master.position[0], 0.55, master.position[2]] as [number, number, number],
-        [sub.position[0], 0.55, sub.position[2]] as [number, number, number],
+        [master.position[0], 0.8, master.position[2]] as [number, number, number],
+        [sub.position[0], 0.8, sub.position[2]] as [number, number, number],
       ],
     };
   });
@@ -232,9 +70,9 @@ function Connectors() {
           key={`bm-${i}`}
           points={line.points}
           color={line.color}
-          lineWidth={2}
+          lineWidth={2.2}
           transparent
-          opacity={0.55}
+          opacity={0.45}
         />
       ))}
       {masterToSubLines.map((line, i) => (
@@ -242,21 +80,99 @@ function Connectors() {
           key={`ms-${i}`}
           points={line.points}
           color={line.color}
-          lineWidth={2}
+          lineWidth={2.2}
           transparent
-          opacity={0.55}
+          opacity={0.45}
         />
       ))}
     </group>
   );
 }
 
-// ---- Top-left header (HTML overlay inside Canvas via <Html>) -------------
-// Shows the title + interaction hint, pinned to the top-left of the canvas.
+// ---- Minimal Slack-style Presence Tag -----------------------------------
+// Rendered subtly directly above each monitor in local workstation space.
+function SlackPresenceTag({ agent }: { agent: CommandAgent }) {
+  const isBoss = agent.tier === "boss";
+  const openChat = useCommandCenterStore((s) => s.openChat);
+
+  const statusText = isBoss
+    ? "Active"
+    : agent.poseType === "typing"
+    ? "Typing..."
+    : agent.poseType === "mouse_work"
+    ? "Working"
+    : agent.poseType === "coffee_break"
+    ? "Coffee Break"
+    : agent.poseType === "screen_pointing"
+    ? "Reviewing"
+    : "On Call";
+
+  return (
+    <group position={agent.position} rotation={[0, agent.rotationY, 0]}>
+      <Html
+        center
+        distanceFactor={11}
+        position={[0, 1.85, -0.3]} // Floating subtly above the workstation monitor
+        style={{ pointerEvents: "auto" }}
+      >
+        <div
+          onClick={(e) => {
+            e.stopPropagation();
+            openChat(isBoss ? null : (agent.channel as never));
+          }}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "3px 8px",
+            borderRadius: 6,
+            background: "rgba(15, 23, 42, 0.85)",
+            border: `1px solid ${agent.color}88`,
+            boxShadow: `0 2px 8px rgba(0, 0, 0, 0.4), 0 0 10px ${agent.color}33`,
+            color: "#f8fafc",
+            fontFamily:
+              "ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif",
+            fontSize: 10,
+            fontWeight: 600,
+            whiteSpace: "nowrap",
+            cursor: "pointer",
+            backdropFilter: "blur(6px)",
+            userSelect: "none",
+          }}
+        >
+          {/* Online Presence Indicator Dot */}
+          <span
+            style={{
+              width: 6,
+              height: 6,
+              borderRadius: "50%",
+              background: agent.color,
+              boxShadow: `0 0 6px ${agent.color}`,
+            }}
+          />
+          <span>{agent.emoji}</span>
+          <span>{agent.name}</span>
+          <span
+            style={{
+              fontSize: 9,
+              color: "#94a3b8",
+              fontWeight: 400,
+              marginLeft: 2,
+            }}
+          >
+            · {statusText}
+          </span>
+        </div>
+      </Html>
+    </group>
+  );
+}
+
+// ---- Top-left header (HTML overlay pinned to scene) ----------------------
 function SceneHeader() {
   return (
     <Html
-      position={[-ROOM.width / 2 + 0.5, ROOM.height - 0.5, -ROOM.depth / 2 + 0.5]}
+      position={[-9.2, 4.3, -8.2]}
       transform
       occlude={false}
       style={{ pointerEvents: "none" }}
@@ -275,7 +191,7 @@ function SceneHeader() {
           backdropFilter: "blur(8px)",
         }}
       >
-        🏢 Command Center
+        🏢 AI Command Center HQ
         <div
           style={{
             fontSize: 10,
@@ -284,26 +200,25 @@ function SceneHeader() {
             marginTop: 2,
           }}
         >
-          Click any bot to view its activity feed · drag to orbit
+          Seated active workstations · Click any agent to inspect activity feed
         </div>
       </div>
     </Html>
   );
 }
 
-// ---- Bottom-left legend (HTML overlay) -----------------------------------
-// Quick at-a-glance of all channels + update count.
+// ---- Bottom-left channels sidebar (HTML overlay) ------------------------
 function SceneLegend() {
   const updateCount = useCommandCenterStore((s) => s.updates.length);
   const openChat = useCommandCenterStore((s) => s.openChat);
 
   return (
-    <Html position={[-ROOM.width / 2 + 0.5, 0.5, ROOM.depth / 2 - 0.5]} transform>
+    <Html position={[-9.2, 0.6, 7.8]} transform>
       <div
         style={{
           padding: "10px 14px",
           borderRadius: 12,
-          background: "rgba(15, 23, 42, 0.85)",
+          background: "rgba(15, 23, 42, 0.88)",
           color: "#e2e8f0",
           fontFamily: "ui-sans-serif, system-ui, sans-serif",
           fontSize: 11,
@@ -323,7 +238,7 @@ function SceneLegend() {
             textTransform: "uppercase",
           }}
         >
-          Channels
+          Department Pods
         </div>
         {Object.entries(CHANNEL_META).map(([key, meta]) => (
           <div
@@ -369,19 +284,15 @@ function SceneLegend() {
   );
 }
 
-// ---- Main scene ----------------------------------------------------------
+// ---- Main 3D Office Scene ------------------------------------------------
 export function CommandScene() {
-  const m = useRoomMaterials();
   const openChat = useCommandCenterStore((s) => s.openChat);
-
-  // All 11 bots in render order
-  const allBots: CommandAgent[] = [BOSS, ...MASTER_AGENTS, ...SUB_AGENTS];
 
   return (
     <Canvas
       shadows
       dpr={[1, 1.8]}
-      camera={{ position: [0, 5, 9], fov: 50 }}
+      camera={{ position: [0, 8.5, 14.5], fov: 48 }}
       gl={{
         antialias: true,
         toneMapping: THREE.ACESFilmicToneMapping,
@@ -391,140 +302,92 @@ export function CommandScene() {
     >
       <AdaptiveDpr pixelated={false} />
 
-      {/* Bright soft-gray background + light fog */}
-      <color attach="background" args={["#f1f5f9"]} />
-      <fog attach="fog" args={["#f1f5f9", 20, 38]} />
+      {/* Modern Studio Background & Warm Atmosphere Fog */}
+      <color attach="background" args={["#0f172a"]} />
+      <fog attach="fog" args={["#0f172a", 24, 45]} />
 
-      {/* ---- Lighting ---- */}
-      <ambientLight intensity={0.75} />
+      {/* ---- Lighting Setup ---- */}
+      <ambientLight intensity={0.8} />
       <directionalLight
-        position={[6, 9, 5]}
-        intensity={1.1}
+        position={[8, 12, 6]}
+        intensity={1.25}
         castShadow
         shadow-mapSize-width={2048}
         shadow-mapSize-height={2048}
-        shadow-camera-left={-12}
-        shadow-camera-right={12}
-        shadow-camera-top={12}
-        shadow-camera-bottom={-12}
-        shadow-camera-near={0.5}
-        shadow-camera-far={30}
+        shadow-camera-left={-14}
+        shadow-camera-right={14}
+        shadow-camera-top={14}
+        shadow-camera-bottom={-14}
         shadow-bias={-0.0005}
       />
-      {/* Boss accent light — gold, from above the platform */}
+
+      {/* Boss Accent Gold Spotlight */}
       <pointLight
-        position={[BOSS.position[0], 3, BOSS.position[2]]}
+        position={[BOSS.position[0], 3.8, BOSS.position[2]]}
         color={BOSS.color}
-        intensity={1.2}
-        distance={6}
+        intensity={1.5}
+        distance={8}
         decay={2}
       />
-      {/* Per-channel accent lights at the master row */}
+
+      {/* Department Pod Accent Lights */}
       {MASTER_AGENTS.map((a) => (
         <pointLight
           key={a.id}
-          position={[a.position[0], 2.5, a.position[2]]}
+          position={[a.position[0], 3.2, a.position[2]]}
           color={a.color}
-          intensity={0.5}
-          distance={3}
+          intensity={0.7}
+          distance={5}
           decay={2}
         />
       ))}
 
       <Suspense fallback={null}>
-        {/* ---- Floor ---- */}
-        <mesh
-          material={m.floor}
-          receiveShadow
-          position={[0, -0.01, 0]}
-          rotation={[-Math.PI / 2, 0, 0]}
-        >
-          <planeGeometry args={[ROOM.width, ROOM.depth]} />
-        </mesh>
+        {/* ---- 3D Office Architectural Shell ---- */}
+        <OfficeEnvironment />
 
-        {/* ---- Walls (back + 2 sides; front omitted for camera) ---- */}
-        <mesh
-          material={m.wall}
-          receiveShadow
-          position={[0, ROOM.height / 2, -ROOM.depth / 2]}
-        >
-          <boxGeometry args={[ROOM.width, ROOM.height, WALL_THICKNESS]} />
-        </mesh>
-        <mesh
-          material={m.wall}
-          receiveShadow
-          position={[-ROOM.width / 2, ROOM.height / 2, 0]}
-        >
-          <boxGeometry args={[WALL_THICKNESS, ROOM.height, ROOM.depth]} />
-        </mesh>
-        <mesh
-          material={m.wall}
-          receiveShadow
-          position={[ROOM.width / 2, ROOM.height / 2, 0]}
-        >
-          <boxGeometry args={[WALL_THICKNESS, ROOM.height, ROOM.depth]} />
-        </mesh>
-
-        {/* ---- Ceiling strip lights ---- */}
-        {[-4, 0, 4].map((x) => (
-          <mesh
-            key={x}
-            material={m.ceilingLight}
-            position={[x, ROOM.height - 0.05, 0]}
-          >
-            <boxGeometry args={[2, 0.04, 0.4]} />
-          </mesh>
+        {/* ---- Workstation Furniture & Clutter ---- */}
+        {ALL_AGENTS.map((agent) => (
+          <WorkstationDesk key={`desk-${agent.id}`} agent={agent} />
         ))}
 
-        {/* ---- Window on the back wall (offset to the right so it doesn't
-            sit directly behind the boss) ---- */}
-        <WindowOnWall
-          position={[5.5, 2.8, -ROOM.depth / 2 + 0.15]}
-          width={3}
-          height={1.8}
-        />
-        {/* Second smaller window on the left */}
-        <WindowOnWall
-          position={[-5.5, 2.8, -ROOM.depth / 2 + 0.15]}
-          width={3}
-          height={1.8}
-        />
+        {/* ---- Seated Working AI Agents ---- */}
+        {ALL_AGENTS.map((agent) => (
+          <CommandBot key={`bot-${agent.id}`} agent={agent} />
+        ))}
 
-        {/* ---- Boss platform ---- */}
-        <BossPlatform />
+        {/* ---- Slack-style Presence Tags ---- */}
+        {ALL_AGENTS.map((agent) => (
+          <SlackPresenceTag key={`tag-${agent.id}`} agent={agent} />
+        ))}
 
-        {/* ---- Connector lines (drawn BEFORE bots so bots render on top) ---- */}
+        {/* ---- Reporting Hierarchy Conduits ---- */}
         <Connectors />
 
-        {/* ---- The 11 bots ---- */}
-        {allBots.map((agent) => (
-          <CommandBot key={agent.id} agent={agent} />
-        ))}
-
-        {/* ---- Soft contact shadows ---- */}
+        {/* ---- Soft Contact Shadows ---- */}
         <ContactShadows
           position={[0, 0.005, 0]}
-          opacity={0.3}
-          scale={18}
-          blur={2.6}
-          far={5}
+          opacity={0.35}
+          scale={22}
+          blur={2.5}
+          far={6}
           resolution={1024}
-          color="#0f172a"
+          color="#020617"
         />
 
-        {/* ---- HTML overlays pinned to the 3D scene ---- */}
+        {/* ---- HTML overlays pinned to 3D room coordinates ---- */}
         <SceneHeader />
         <SceneLegend />
       </Suspense>
 
-      {/* ---- Camera controls ---- */}
+      {/* ---- Interactive Camera Orbit Controls ---- */}
       <OrbitControls
         enableDamping
         dampingFactor={0.08}
-        minDistance={5}
-        maxDistance={18}
+        minDistance={6}
+        maxDistance={24}
         maxPolarAngle={Math.PI / 2 - 0.05}
-        target={[0, 1, -1]}
+        target={[0, 1.2, 0]}
       />
     </Canvas>
   );

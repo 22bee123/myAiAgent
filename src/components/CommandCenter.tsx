@@ -23,7 +23,6 @@ import { useEffect, useRef } from "react";
 import dynamic from "next/dynamic";
 import {
   MASTER_AGENTS,
-  SUB_AGENTS,
   CHANNELS,
 } from "@/lib/commandAgents";
 import {
@@ -66,31 +65,35 @@ export function CommandCenter() {
   }, [pushUpdate]);
 
   // ---- Background activity loop ----
-  // One timer chain per agent (10 total: 5 masters + 5 subs). Boss doesn't
-  // auto-post. Each agent posts on its own schedule with ±20% jitter.
+  // Only MASTER agents post to the activity feed. Sub agents work silently
+  // behind the scenes. Boss doesn't auto-post either.
   useEffect(() => {
     const timers: ReturnType<typeof setTimeout>[] = [];
 
     const schedulePost = (
       agentId: string,
       channel: (typeof CHANNELS)[number],
-      tier: "master" | "sub",
       baseInterval: number
     ) => {
       const tick = async () => {
         let text: string | null = null;
         let severity: "info" | "warning" | "success" = "info";
 
-        if (agentId === "email-sub") {
+        if (channel === "email") {
           // Real email check — only posts if there's something to report
           const real = await generateRealEmailUpdate();
           if (real) {
             text = real.text;
             severity = real.severity;
+          } else {
+            // Fallback to mock when real check returns nothing
+            const mock = generateMockUpdate(channel, "master");
+            text = mock.text;
+            severity = mock.severity ?? "info";
           }
         } else {
-          // Mocked generator
-          const mock = generateMockUpdate(channel, tier);
+          // Mocked generator for other channels
+          const mock = generateMockUpdate(channel, "master");
           text = mock.text;
           severity = mock.severity ?? "info";
         }
@@ -106,19 +109,12 @@ export function CommandCenter() {
         timers.push(setTimeout(tick, jitter));
       };
 
-      // Stagger the first post — masters fire first, then subs
-      const initialDelay =
-        tier === "master"
-          ? 1500 + Math.random() * 3000
-          : 4000 + Math.random() * 4000;
+      const initialDelay = 1500 + Math.random() * 3000;
       timers.push(setTimeout(tick, initialDelay));
     };
 
     MASTER_AGENTS.forEach((agent) => {
-      schedulePost(agent.id, agent.channel as never, "master", agent.postInterval);
-    });
-    SUB_AGENTS.forEach((agent) => {
-      schedulePost(agent.id, agent.channel as never, "sub", agent.postInterval);
+      schedulePost(agent.id, agent.channel as never, agent.postInterval);
     });
 
     return () => {
