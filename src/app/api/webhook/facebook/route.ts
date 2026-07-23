@@ -20,7 +20,7 @@
 //   FB_PAGE_ID            – your Page's numeric ID
 // ===========================================================================
 
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { sendFacebookMessage } from "@/lib/facebook";
 import type {
   WebhookBody,
@@ -99,22 +99,15 @@ export async function POST(req: NextRequest) {
   }
 
   // 5. ACK immediately (return 200) and process events in the background.
-  //    This prevents Facebook from retrying if our AI takes a while.
-  //
-  //    NOTE: In Vercel serverless functions, the runtime may kill the process
-  //    after the response is sent. For truly fire-and-forget background work
-  //    on Vercel, use `waitUntil` (available on the Vercel Edge/Node runtime).
-  //    We use a simple promise-based approach here which works for most cases.
-  const processingPromise = processEntries(body.entry).catch((err) => {
-    console.error("[fb-webhook] Background processing failed:", err);
+  //    In Vercel serverless functions, `after()` ensures the function stays
+  //    alive after sending the 200 OK response to Facebook.
+  after(async () => {
+    try {
+      await processEntries(body.entry);
+    } catch (err) {
+      console.error("[fb-webhook] Background processing failed:", err);
+    }
   });
-
-  // Use waitUntil if available (Vercel Node.js runtime exposes it).
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const ctxWithWaitUntil = (globalThis as any).__nextWaitUntil;
-  if (typeof ctxWithWaitUntil === "function") {
-    ctxWithWaitUntil(processingPromise);
-  }
 
   return NextResponse.json({ status: "ok" }, { status: 200 });
 }
@@ -245,50 +238,69 @@ async function handleMessagingEvent(event: MessagingEvent): Promise<void> {
   // --- Delivery / Read / Other events — silently ignore ---
 }
 
-// ---- Channel Master routing (stub) ----------------------------------------
+// ---- Channel Master routing (AI Integration) ------------------------------
 
 /**
- * Routes an incoming message to the appropriate AI channel master for
- * processing. The channel master will coordinate with its sub-bots and
- * return a reply.
- *
- * TODO: Replace this stub with your actual Boss → Channel Master → Sub-bot
- * routing logic. This should:
- *   1. Look up the channel master agent for the given channel
- *   2. Pass the message through your AI pipeline (DeepSeek, GPT, etc.)
- *   3. Return the generated reply text
- *
- * For now, returns a friendly default reply so the webhook works end-to-end
- * while you build out the AI logic.
- *
- * @param channel   The channel this message came from (always "facebook" here).
- * @param senderId  The sender's Page-Scoped ID (PSID).
- * @param message   The incoming message text (or postback payload).
- * @returns         The reply text to send back to the user.
+ * Routes an incoming Facebook message to the AI engine (DeepSeek) to generate
+ * an intelligent response.
  */
 async function routeToChannelMaster(
   channel: "facebook",
   senderId: string,
   message: string
 ): Promise<string> {
-  // TODO: Wire this to your actual AI agent hierarchy.
-  // Example integration point:
-  //
-  //   import { getMasterForChannel } from "@/lib/commandAgents";
-  //   import { callDeepSeek } from "@/lib/deepseek";
-  //
-  //   const master = getMasterForChannel(channel);
-  //   const systemPrompt = master.systemPrompt;
-  //   const reply = await callDeepSeek(systemPrompt, message, senderId);
-  //   return reply;
-
   console.log(
-    `[fb-webhook] routeToChannelMaster(${channel}, ${senderId}, "${message}")`
+    `[fb-webhook] 🤖 Processing message for ${channel} from sender ${senderId}: "${message}"`
   );
 
-  // Default fallback reply — proves the webhook is working.
-  return (
-    "Thanks for your message! 🤖 Our AI agent is setting up and will be " +
-    "fully operational soon. We'll get back to you shortly!"
-  );
+  const apiKey = process.env.DEEPSEEK_API_KEY;
+  if (!apiKey || apiKey.includes("REPLACE")) {
+    console.warn("[fb-webhook] DEEPSEEK_API_KEY not configured, using default reply");
+    return "Thanks for your message! 🤖 Our AI Facebook Assistant is setting up and will be fully operational soon!";
+  }
+
+  const baseUrl = process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com/v1";
+  const model = process.env.DEEPSEEK_MODEL || "deepseek-chat";
+
+  try {
+    const res = await fetch(`${baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          {
+            role: "system",
+            content:
+              "You are the official AI Assistant for our Facebook Page. " +
+              "Provide helpful, friendly, and concise responses (1-3 sentences max) to user messages.",
+          },
+          { role: "user", content: message },
+        ],
+        temperature: 0.6,
+        max_tokens: 250,
+      }),
+      signal: AbortSignal.timeout(15_000),
+    });
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => "");
+      console.error(`[fb-webhook] DeepSeek API error ${res.status}:`, errText);
+      return "Thanks for reaching out! We've received your message and will reply shortly.";
+    }
+
+    const data = await res.json();
+    const reply = data?.choices?.[0]?.message?.content?.trim();
+    if (reply) {
+      console.log(`[fb-webhook] ✨ DeepSeek generated reply: "${reply}"`);
+      return reply;
+    }
+  } catch (err) {
+    console.error("[fb-webhook] Error calling DeepSeek:", err);
+  }
+
+  return "Thanks for reaching out! We've received your message and will reply shortly.";
 }

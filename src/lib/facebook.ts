@@ -49,11 +49,8 @@ export interface PhotoUploadResponse {
 const GRAPH_API_VERSION = "v21.0";
 const GRAPH_BASE = `https://graph.facebook.com/${GRAPH_API_VERSION}`;
 
-const FB_PAGE_ACCESS_TOKEN = process.env.FB_PAGE_ACCESS_TOKEN;
-const FB_PAGE_ID = process.env.FB_PAGE_ID;
-
 export function isFacebookConfigured(): boolean {
-  return Boolean(FB_PAGE_ACCESS_TOKEN && FB_PAGE_ID);
+  return Boolean(process.env.FB_PAGE_ACCESS_TOKEN && process.env.FB_PAGE_ID);
 }
 
 // ---- Internal helpers -----------------------------------------------------
@@ -67,7 +64,10 @@ async function graphFetch<T = Record<string, unknown>>(
   path: string,
   init: RequestInit = {}
 ): Promise<GraphResult<T>> {
-  if (!FB_PAGE_ACCESS_TOKEN) {
+  const accessToken = process.env.FB_PAGE_ACCESS_TOKEN;
+
+  if (!accessToken) {
+    console.error("[facebook] FB_PAGE_ACCESS_TOKEN is missing from process.env!");
     return {
       ok: false,
       error:
@@ -77,7 +77,7 @@ async function graphFetch<T = Record<string, unknown>>(
 
   // Build URL with access_token query param (standard for Graph API)
   const separator = path.includes("?") ? "&" : "?";
-  const url = `${GRAPH_BASE}${path}${separator}access_token=${FB_PAGE_ACCESS_TOKEN}`;
+  const url = `${GRAPH_BASE}${path}${separator}access_token=${accessToken}`;
 
   try {
     const res = await fetch(url, {
@@ -139,7 +139,8 @@ export async function createFacebookPost(
   message: string,
   scheduledTime?: number
 ): Promise<GraphResult<FeedPostResponse>> {
-  if (!FB_PAGE_ID) {
+  const pageId = process.env.FB_PAGE_ID;
+  if (!pageId) {
     return {
       ok: false,
       error: "FB_PAGE_ID not configured. Set it in your environment.",
@@ -153,7 +154,7 @@ export async function createFacebookPost(
     payload.scheduled_publish_time = scheduledTime;
   }
 
-  return graphFetch<FeedPostResponse>(`/${FB_PAGE_ID}/feed`, {
+  return graphFetch<FeedPostResponse>(`/${pageId}/feed`, {
     method: "POST",
     body: JSON.stringify(payload),
   });
@@ -172,14 +173,15 @@ export async function uploadFacebookPhoto(
   imageUrl: string,
   published = true
 ): Promise<GraphResult<PhotoUploadResponse>> {
-  if (!FB_PAGE_ID) {
+  const pageId = process.env.FB_PAGE_ID;
+  if (!pageId) {
     return {
       ok: false,
       error: "FB_PAGE_ID not configured. Set it in your environment.",
     };
   }
 
-  return graphFetch<PhotoUploadResponse>(`/${FB_PAGE_ID}/photos`, {
+  return graphFetch<PhotoUploadResponse>(`/${pageId}/photos`, {
     method: "POST",
     body: JSON.stringify({
       url: imageUrl,
