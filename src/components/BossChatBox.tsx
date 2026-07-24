@@ -22,6 +22,7 @@ import {
   Send,
   Bot,
   Loader2,
+  Paperclip,
 } from "lucide-react";
 
 import {
@@ -70,11 +71,16 @@ export function BossChatBox() {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [inputText, setInputText] = useState("");
   const [sending, setSending] = useState(false);
+  const [selectedImage, setSelectedImage] = useState<File | null>(null);
+  const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Reset chat when channel changes
   useEffect(() => {
     setChatMessages([]);
     setInputText("");
+    setSelectedImage(null);
+    setImagePreviewUrl(null);
   }, [filterChannel]);
 
   // Filter updates to only show master agent posts (extra safety on top of
@@ -144,23 +150,40 @@ export function BossChatBox() {
   // Send message
   const handleSend = useCallback(async () => {
     const text = inputText.trim();
-    if (!text || sending) return;
+    if ((!text && !selectedImage) || sending) return;
+
+    let imageBase64: string | undefined = undefined;
+    let imageMime: string | undefined = undefined;
+    let imageName: string | undefined = undefined;
+
+    if (selectedImage) {
+      // Read file as base64
+      const reader = new FileReader();
+      imageBase64 = await new Promise<string>((resolve) => {
+        reader.onload = () => resolve(reader.result as string);
+        reader.readAsDataURL(selectedImage);
+      });
+      imageMime = selectedImage.type;
+      imageName = selectedImage.name;
+    }
 
     const userMsg: ChatMessage = {
       id: `u-${Date.now()}`,
       role: "user",
-      text,
+      text: text + (selectedImage ? `\n[Attached Image: ${selectedImage.name}]` : ""),
       ts: Date.now(),
     };
     setChatMessages((prev) => [...prev, userMsg]);
     setInputText("");
+    setSelectedImage(null);
+    setImagePreviewUrl(null);
     setSending(true);
 
     try {
       const res = await fetch(`/api/agents/${agentId}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text }),
+        body: JSON.stringify({ message: text, imageBase64, imageMime, imageName }),
       });
       const data = await res.json();
       const botMsg: ChatMessage = {
@@ -186,7 +209,16 @@ export function BossChatBox() {
       setSending(false);
       setTimeout(() => inputRef.current?.focus(), 50);
     }
-  }, [inputText, sending, agentId]);
+  }, [inputText, sending, agentId, selectedImage]);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setSelectedImage(file);
+      const url = URL.createObjectURL(file);
+      setImagePreviewUrl(url);
+    }
+  };
 
   return (
     <AnimatePresence>
@@ -346,6 +378,23 @@ export function BossChatBox() {
 
             {/* ---- Chat Input ---- */}
             <div className="border-t border-slate-700/60 bg-slate-950/50 p-3">
+              {/* Image Preview */}
+              {imagePreviewUrl && (
+                <div className="mb-3 relative inline-block">
+                  <img src={imagePreviewUrl} alt="Preview" className="h-20 w-auto rounded-md border border-slate-700 object-cover" />
+                  <button
+                    onClick={() => {
+                      setSelectedImage(null);
+                      setImagePreviewUrl(null);
+                      if (fileInputRef.current) fileInputRef.current.value = "";
+                    }}
+                    className="absolute -top-2 -right-2 bg-slate-800 text-white rounded-full p-1 border border-slate-600 hover:bg-slate-700"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              )}
+              
               <form
                 onSubmit={(e) => {
                   e.preventDefault();
@@ -353,18 +402,34 @@ export function BossChatBox() {
                 }}
                 className="flex items-center gap-2"
               >
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-800/80 text-slate-400 hover:text-white hover:bg-slate-700 transition border border-slate-700"
+                  title="Attach Image"
+                >
+                  <Paperclip className="h-4 w-4" />
+                </button>
+                <input
+                  type="file"
+                  accept="image/*"
+                  ref={fileInputRef}
+                  onChange={handleFileChange}
+                  className="hidden"
+                />
+                
                 <input
                   ref={inputRef}
                   type="text"
                   value={inputText}
                   onChange={(e) => setInputText(e.target.value)}
-                  placeholder={`Message ${agentLabel}…`}
+                  placeholder={selectedImage ? "Add a caption prompt for AI..." : `Message ${agentLabel}…`}
                   disabled={sending}
                   className="flex-1 rounded-lg border border-slate-700 bg-slate-800/80 px-3 py-2.5 text-sm text-slate-100 placeholder-slate-500 outline-none transition focus:border-slate-500 focus:ring-1 focus:ring-slate-500/50 disabled:opacity-50"
                 />
                 <button
                   type="submit"
-                  disabled={!inputText.trim() || sending}
+                  disabled={(!inputText.trim() && !selectedImage) || sending}
                   className="flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br from-amber-500 to-orange-600 text-white shadow-md transition hover:from-amber-400 hover:to-orange-500 disabled:opacity-30 disabled:hover:from-amber-500"
                   title="Send message"
                 >

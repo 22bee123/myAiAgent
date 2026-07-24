@@ -80,12 +80,18 @@ async function graphFetch<T = Record<string, unknown>>(
   const url = `${GRAPH_BASE}${path}${separator}access_token=${accessToken}`;
 
   try {
+    // Do not force application/json if sending FormData
+    const isFormData = init.body instanceof FormData;
+    const headers: Record<string, string> = {
+      ...(init.headers as Record<string, string> ?? {}),
+    };
+    if (!isFormData && !headers["Content-Type"]) {
+      headers["Content-Type"] = "application/json";
+    }
+
     const res = await fetch(url, {
       ...init,
-      headers: {
-        "Content-Type": "application/json",
-        ...(init.headers ?? {}),
-      },
+      headers,
     });
 
     const body = await res.json();
@@ -180,5 +186,39 @@ export async function uploadFacebookPhoto(
   return graphFetch<PhotoUploadResponse>(`/${target}/photos`, {
     method: "POST",
     body: JSON.stringify(payload),
+  });
+}
+
+/**
+ * Upload a photo to the Page using raw binary file data (multipart/form-data).
+ * This is used for uploading images directly from the web client.
+ *
+ * @param imageBuffer The binary buffer of the image.
+ * @param mimeType    The MIME type of the image (e.g., 'image/jpeg').
+ * @param filename    A name for the file (e.g., 'upload.jpg').
+ * @param caption     Optional post caption text.
+ * @param published   If true, publishes directly to the feed.
+ */
+export async function uploadFacebookPhotoBinary(
+  imageBuffer: Buffer,
+  mimeType: string,
+  filename: string,
+  caption?: string,
+  published = true
+): Promise<GraphResult<PhotoUploadResponse>> {
+  const target = process.env.FB_PAGE_ID || "me";
+  
+  const formData = new FormData();
+  // Using Blob instead of File for node-fetch compatibility across Next.js runtimes
+  const blob = new Blob([imageBuffer], { type: mimeType });
+  formData.append("source", blob, filename);
+  formData.append("published", String(published));
+  if (caption) {
+    formData.append("caption", caption);
+  }
+
+  return graphFetch<PhotoUploadResponse>(`/${target}/photos`, {
+    method: "POST",
+    body: formData,
   });
 }

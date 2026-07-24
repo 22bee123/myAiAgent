@@ -22,6 +22,7 @@ import { NextResponse } from "next/server";
 import { getAgentById, systemPromptFor } from "@/lib/agents";
 import { fetchInbox } from "@/lib/email";
 import { buildTracker } from "@/lib/applications";
+import { uploadFacebookPhotoBinary } from "@/lib/facebook";
 
 export const dynamic = "force-dynamic";
 // DeepSeek calls can take a few seconds — give the route plenty of room.
@@ -53,10 +54,13 @@ export async function POST(
 
   const body = await req.json().catch(() => ({}));
   const userMessage: string = (body?.message ?? "").toString().trim();
+  const imageBase64: string | undefined = body?.imageBase64;
+  const imageMime: string | undefined = body?.imageMime || "image/jpeg";
+  const imageName: string | undefined = body?.imageName || "upload.jpg";
 
-  if (!userMessage) {
+  if (!userMessage && !imageBase64) {
     return NextResponse.json(
-      { error: "Missing `message` in request body" },
+      { error: "Missing `message` or `image` in request body" },
       { status: 400 }
     );
   }
@@ -181,6 +185,18 @@ export async function POST(
         }
       }
 
+      // If the user uploaded an image, we override the standard chat behavior
+      // to generate a caption and post to Facebook.
+      if (imageBase64) {
+        systemPrompt = [
+          "You are a professional social media manager for a Facebook Page.",
+          "The user is uploading an image and providing instructions on what the post should be about.",
+          "Your task is to generate the FINAL, ready-to-publish text caption for this Facebook post based on the user's instructions.",
+          "DO NOT include any introductory or conversational text like 'Here is your caption:' or 'I have generated it.'",
+          "Just return the exact text and emojis to be used as the caption.",
+        ].join("\n");
+      }
+
       const res = await fetch(`${DEEPSEEK_BASE_URL}/chat/completions`, {
         method: "POST",
         headers: {
@@ -225,6 +241,35 @@ export async function POST(
       const reply: string =
         data?.choices?.[0]?.message?.content?.trim() ||
         "(DeepSeek returned an empty response — try rephrasing.)";
+
+      // If an image was uploaded, process the Facebook upload now
+      if (imageBase64) {
+        try {
+          const buffer = Buffer.from(imageBase64.replace(/^data:image\/\w+;base64,/, ""), "base64");
+          const fbRes = await uploadFacebookPhotoBinary(buffer, imageMime, imageName, reply);
+          
+          if (fbRes.ok) {
+            return NextResponse.json({
+              reply: `📸 ✅ Successfully uploaded your photo to Facebook!\n\n**Caption:**\n${reply}\n\n**Post ID:** ${fbRes.data.id}`,
+              source: "deepseek",
+              model: DEEPSEEK_MODEL,
+            });
+          } else {
+            return NextResponse.json({
+              reply: `❌ Failed to upload photo to Facebook: ${fbRes.error}`,
+              source: "error",
+              model: DEEPSEEK_MODEL,
+            });
+          }
+        } catch (uploadErr) {
+          console.error("Facebook upload failed:", uploadErr);
+          return NextResponse.json({
+            reply: "❌ An error occurred while uploading the photo to Facebook.",
+            source: "error",
+            model: DEEPSEEK_MODEL,
+          });
+        }
+      }
 
       return NextResponse.json({
         reply,
