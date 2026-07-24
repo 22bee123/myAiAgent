@@ -117,8 +117,7 @@ export async function sendFacebookMessage(
   recipientId: string,
   text: string
 ): Promise<GraphResult<SendApiResponse>> {
-  const target = process.env.FB_PAGE_ID || "me";
-  return graphFetch<SendApiResponse>(`/${target}/messages`, {
+  return graphFetch<SendApiResponse>(`/me/messages`, {
     method: "POST",
     body: JSON.stringify({
       recipient: { id: recipientId },
