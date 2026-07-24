@@ -139,6 +139,7 @@ export async function createFacebookPost(
   message: string,
   scheduledTime?: number
 ): Promise<GraphResult<FeedPostResponse>> {
+  const target = process.env.FB_PAGE_ID || "me";
   const payload: Record<string, unknown> = { message };
 
   if (scheduledTime) {
@@ -146,7 +147,7 @@ export async function createFacebookPost(
     payload.scheduled_publish_time = scheduledTime;
   }
 
-  return graphFetch<FeedPostResponse>(`/me/feed`, {
+  return graphFetch<FeedPostResponse>(`/${target}/feed`, {
     method: "POST",
     body: JSON.stringify(payload),
   });
@@ -167,6 +168,7 @@ export async function uploadFacebookPhoto(
   published = true,
   caption?: string
 ): Promise<GraphResult<PhotoUploadResponse>> {
+  const target = process.env.FB_PAGE_ID || "me";
   const payload: Record<string, unknown> = {
     url: imageUrl,
     published,
@@ -175,7 +177,7 @@ export async function uploadFacebookPhoto(
     payload.caption = caption;
   }
 
-  return graphFetch<PhotoUploadResponse>(`/me/photos`, {
+  return graphFetch<PhotoUploadResponse>(`/${target}/photos`, {
     method: "POST",
     body: JSON.stringify(payload),
   });
