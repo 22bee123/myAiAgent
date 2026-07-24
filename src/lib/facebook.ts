@@ -171,7 +171,8 @@ export async function createFacebookPost(
  */
 export async function uploadFacebookPhoto(
   imageUrl: string,
-  published = true
+  published = true,
+  caption?: string
 ): Promise<GraphResult<PhotoUploadResponse>> {
   const pageId = process.env.FB_PAGE_ID;
   if (!pageId) {
@@ -181,11 +182,16 @@ export async function uploadFacebookPhoto(
     };
   }
 
+  const payload: Record<string, unknown> = {
+    url: imageUrl,
+    published,
+  };
+  if (caption) {
+    payload.caption = caption;
+  }
+
   return graphFetch<PhotoUploadResponse>(`/${pageId}/photos`, {
     method: "POST",
-    body: JSON.stringify({
-      url: imageUrl,
-      published,
-    }),
+    body: JSON.stringify(payload),
   });
 }

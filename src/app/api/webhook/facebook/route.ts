@@ -21,7 +21,11 @@
 // ===========================================================================
 
 import { NextRequest, NextResponse, after } from "next/server";
-import { sendFacebookMessage } from "@/lib/facebook";
+import {
+  sendFacebookMessage,
+  uploadFacebookPhoto,
+  createFacebookPost,
+} from "@/lib/facebook";
 import type {
   WebhookBody,
   WebhookEntry,
@@ -185,8 +189,10 @@ async function processEntries(entries: WebhookEntry[]): Promise<void> {
 
 /**
  * Handles a single messaging event. Currently processes:
- *   - Text messages → routed to the AI channel master for a reply.
- *   - Postbacks → same treatment (uses the postback payload as "message").
+ *   - Image attachments → automatically publishes the photo to the Facebook Page feed!
+ *   - Post commands (e.g. "post to page: ...") → publishes text post to Page feed.
+ *   - Text messages → routed to the AI channel master for an AI reply.
+ *   - Postbacks → routed to AI channel master.
  *
  * Ignores echoes (messages sent BY the Page) and delivery/read events.
  */
@@ -194,18 +200,54 @@ async function handleMessagingEvent(event: MessagingEvent): Promise<void> {
   const senderId = event.sender?.id;
   if (!senderId) return;
 
-  // --- Text message ---
+  // --- Text message / Attachment ---
   if (event.message) {
     // Ignore echo messages (messages sent by the Page itself).
     if (event.message.is_echo) return;
 
-    const text = event.message.text;
+    const text = (event.message.text ?? "").trim();
+    const attachments = event.message.attachments ?? [];
+
+    // 1. Check for Image Attachments -> Auto-post Photo to Facebook Page Feed!
+    const imageAttachment = attachments.find((att) => att.type === "image");
+    if (imageAttachment?.payload?.url) {
+      const imageUrl = imageAttachment.payload.url as string;
+      console.log(`[fb-webhook] 📸 Image attachment received from ${senderId}: ${imageUrl}`);
+
+      const postResult = await uploadFacebookPhoto(imageUrl, true, text || undefined);
+
+      if (postResult.ok) {
+        const confirmText = `📸 ✅ Success! Your photo has been automatically published to your Facebook Page!\n\nPost ID: ${postResult.data.id}${text ? `\nCaption: "${text}"` : ""}`;
+        await sendFacebookMessage(senderId, confirmText);
+      } else {
+        console.error(`[fb-webhook] Failed to publish photo post:`, postResult.error);
+        const errText = `❌ Failed to auto-post photo to Facebook Page: ${postResult.error}`;
+        await sendFacebookMessage(senderId, errText);
+      }
+      return;
+    }
+
+    // 2. Check for explicit text-only auto-post commands (e.g. "post to page: Hello world!")
+    const postCommandMatch = text.match(/^(?:post|publish|auto\s*post|share)\s*(?:to\s*page|on\s*page)?\s*:\s*(.+)$/i);
+    if (postCommandMatch && postCommandMatch[1]) {
+      const contentToPost = postCommandMatch[1].trim();
+      console.log(`[fb-webhook] 📢 Text auto-post command detected: "${contentToPost}"`);
+
+      const postResult = await createFacebookPost(contentToPost);
+
+      if (postResult.ok) {
+        const confirmText = `📢 ✅ Success! Your post has been published to your Facebook Page!\n\nPost ID: ${postResult.data.id}`;
+        await sendFacebookMessage(senderId, confirmText);
+      } else {
+        console.error(`[fb-webhook] Failed to publish text post:`, postResult.error);
+        const errText = `❌ Failed to publish post to Facebook Page: ${postResult.error}`;
+        await sendFacebookMessage(senderId, errText);
+      }
+      return;
+    }
+
     if (!text) {
-      // Attachment-only messages (images, stickers, etc.) — acknowledge but
-      // don't process. You can extend this later to handle media.
-      console.log(
-        `[fb-webhook] Received non-text message from ${senderId} (attachment/sticker)`
-      );
+      console.log(`[fb-webhook] Received non-text/non-image message from ${senderId}`);
       return;
     }
 
