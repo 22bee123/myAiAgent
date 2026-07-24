@@ -139,14 +139,6 @@ export async function createFacebookPost(
   message: string,
   scheduledTime?: number
 ): Promise<GraphResult<FeedPostResponse>> {
-  const pageId = process.env.FB_PAGE_ID;
-  if (!pageId) {
-    return {
-      ok: false,
-      error: "FB_PAGE_ID not configured. Set it in your environment.",
-    };
-  }
-
   const payload: Record<string, unknown> = { message };
 
   if (scheduledTime) {
@@ -154,7 +146,8 @@ export async function createFacebookPost(
     payload.scheduled_publish_time = scheduledTime;
   }
 
-  return graphFetch<FeedPostResponse>(`/${pageId}/feed`, {
+  // With a Page Access Token, /me/feed automatically targets the Page feed
+  return graphFetch<FeedPostResponse>(`/me/feed`, {
     method: "POST",
     body: JSON.stringify(payload),
   });
@@ -168,20 +161,13 @@ export async function createFacebookPost(
  * @param published  If `false`, the photo is uploaded but not posted — you get
  *                   back an `id` you can attach to a later /{page-id}/feed call
  *                   via the `attached_media` field.
+ * @param caption    Optional post caption text to accompany the photo.
  */
 export async function uploadFacebookPhoto(
   imageUrl: string,
   published = true,
   caption?: string
 ): Promise<GraphResult<PhotoUploadResponse>> {
-  const pageId = process.env.FB_PAGE_ID;
-  if (!pageId) {
-    return {
-      ok: false,
-      error: "FB_PAGE_ID not configured. Set it in your environment.",
-    };
-  }
-
   const payload: Record<string, unknown> = {
     url: imageUrl,
     published,
@@ -190,7 +176,8 @@ export async function uploadFacebookPhoto(
     payload.caption = caption;
   }
 
-  return graphFetch<PhotoUploadResponse>(`/${pageId}/photos`, {
+  // With a Page Access Token, /me/photos automatically targets the Page photo feed
+  return graphFetch<PhotoUploadResponse>(`/me/photos`, {
     method: "POST",
     body: JSON.stringify(payload),
   });
