@@ -117,7 +117,8 @@ export async function sendFacebookMessage(
   recipientId: string,
   text: string
 ): Promise<GraphResult<SendApiResponse>> {
-  return graphFetch<SendApiResponse>(`/me/messages`, {
+  const target = process.env.FB_PAGE_ID || "me";
+  return graphFetch<SendApiResponse>(`/${target}/messages`, {
     method: "POST",
     body: JSON.stringify({
       recipient: { id: recipientId },
@@ -139,6 +140,7 @@ export async function createFacebookPost(
   message: string,
   scheduledTime?: number
 ): Promise<GraphResult<FeedPostResponse>> {
+  const target = process.env.FB_PAGE_ID || "me";
   const payload: Record<string, unknown> = { message };
 
   if (scheduledTime) {
@@ -146,8 +148,7 @@ export async function createFacebookPost(
     payload.scheduled_publish_time = scheduledTime;
   }
 
-  // With a Page Access Token, /me/feed automatically targets the Page feed
-  return graphFetch<FeedPostResponse>(`/me/feed`, {
+  return graphFetch<FeedPostResponse>(`/${target}/feed`, {
     method: "POST",
     body: JSON.stringify(payload),
   });
@@ -168,6 +169,7 @@ export async function uploadFacebookPhoto(
   published = true,
   caption?: string
 ): Promise<GraphResult<PhotoUploadResponse>> {
+  const target = process.env.FB_PAGE_ID || "me";
   const payload: Record<string, unknown> = {
     url: imageUrl,
     published,
@@ -176,8 +178,7 @@ export async function uploadFacebookPhoto(
     payload.caption = caption;
   }
 
-  // With a Page Access Token, /me/photos automatically targets the Page photo feed
-  return graphFetch<PhotoUploadResponse>(`/me/photos`, {
+  return graphFetch<PhotoUploadResponse>(`/${target}/photos`, {
     method: "POST",
     body: JSON.stringify(payload),
   });
